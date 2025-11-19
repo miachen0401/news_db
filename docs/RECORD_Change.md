@@ -56,3 +56,20 @@ Changed from DROP INDEX to ALTER TABLE DROP CONSTRAINT for constraint-backed ind
 ### Fix Applied:
 - Changed `DROP INDEX` → `ALTER TABLE DROP CONSTRAINT` (line 64)
 - Properly handles constraint-backed unique index
+
+## 2025-11-18 16:15: Investigated processing limit and failures
+Test script only processes 10 items at a time; created test_process_all.py to handle all pending items.
+
+### Issue Identified:
+- `test_fetch_news.py` has `limit=10` on line 120
+- Only first 10 pending items (all AAPL) were processed
+- TSLA and GOOGL remain unprocessed (pending)
+- 10 items failed processing (need to check error_log)
+
+### Files Created:
+- `check_failed_items.sql` - Query to check failed processing errors
+- `test_process_all.py` - Process all pending items in batches
+
+### Next Steps:
+1. Run `check_failed_items.sql` to see why 10 items failed
+2. Run `test_process_all.py` to process remaining items
