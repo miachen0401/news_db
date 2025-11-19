@@ -67,6 +67,61 @@ class NewsProcessor:
             print(f"❌ Error processing Finnhub JSON: {e}")
             return None
 
+    def _process_polygon_json(self, raw_json: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+        """
+        Process Polygon JSON format to structured news data.
+
+        Args:
+            raw_json: Raw JSON from Polygon API
+            symbol: Stock symbol
+
+        Returns:
+            Processed news data dict or None if processing failed
+        """
+        try:
+            # Extract required fields
+            title = raw_json.get("title", "")
+            url = raw_json.get("url", "")
+
+            if not title or not url:
+                return None
+
+            # Parse ISO 8601 timestamp
+            published_utc = raw_json.get("published_utc", "")
+            if published_utc:
+                # Polygon uses ISO 8601 format (e.g., "2023-11-18T12:00:00Z")
+                try:
+                    published_at = datetime.fromisoformat(published_utc.replace('Z', '+00:00'))
+                except:
+                    published_at = datetime.now()
+            else:
+                published_at = datetime.now()
+
+            # Build structured data
+            processed_data = {
+                "title": title,
+                "summary": raw_json.get("description", "")[:500],  # Limit summary length
+                "url": url,
+                "published_at": published_at.isoformat(),
+                "symbols": [symbol.upper()],
+                "source_id": None,
+                "external_id": raw_json.get("id", ""),
+                "metadata": {
+                    "fetch_source": "polygon",
+                    "author": raw_json.get("author", ""),
+                    "publisher": raw_json.get("publisher", ""),
+                    "image_url": raw_json.get("image_url", ""),
+                    "amp_url": raw_json.get("amp_url", ""),
+                    "tickers": raw_json.get("tickers", []),
+                }
+            }
+
+            return processed_data
+
+        except Exception as e:
+            print(f"❌ Error processing Polygon JSON: {e}")
+            return None
+
     async def process_raw_item(self, raw_item: Dict[str, Any]) -> bool:
         """
         Process a single raw news item and store in stock_news table.
@@ -97,7 +152,9 @@ class NewsProcessor:
 
             if fetch_source == "finnhub" and raw_json:
                 processed_data = self._process_finnhub_json(raw_json, symbol)
-            # TODO: Add other sources (polygon, newsapi, etc.)
+            elif fetch_source == "polygon" and raw_json:
+                processed_data = self._process_polygon_json(raw_json, symbol)
+            # TODO: Add other sources (newsapi, etc.)
 
             if not processed_data:
                 await self.raw_storage.update_processing_status(

@@ -73,3 +73,27 @@ Test script only processes 10 items at a time; created test_process_all.py to ha
 ### Next Steps:
 1. Run `check_failed_items.sql` to see why 10 items failed
 2. Run `test_process_all.py` to process remaining items
+
+## 2025-11-18 16:30: Added Polygon as second news source
+Implemented PolygonNewsFetcher with full integration for fetching, storing, and processing news.
+
+### Files Created:
+- `fetchers/polygon_fetcher.py` - Polygon.io API client and fetcher
+- `test_multi_source.py` - Test script for both Finnhub and Polygon
+
+### Files Modified:
+- `models/raw_news.py` - Added `from_polygon_response()` method
+- `processors/news_processor.py` - Added `_process_polygon_json()` method
+- `fetchers/__init__.py` - Export PolygonNewsFetcher
+
+### Implementation Details:
+- Polygon API endpoint: `/v2/reference/news`
+- API key env var: `MASSIVE_API_KEY`
+- Response format: ISO 8601 timestamps, different field names than Finnhub
+- Rate limit handling: 200ms delay between requests (5 req/min free tier)
+- Metadata stored: author, publisher, image_url, amp_url, tickers list
+
+### Usage:
+```bash
+uv run python test_multi_source.py
+```

@@ -114,6 +114,37 @@ class RawNewsItem(BaseModel):
             }
         )
 
+    @classmethod
+    def from_polygon_response(
+        cls,
+        symbol: str,
+        article_data: Dict[str, Any]
+    ) -> "RawNewsItem":
+        """
+        Create RawNewsItem from Polygon API response.
+
+        Args:
+            symbol: Stock ticker symbol
+            article_data: Article data from Polygon
+
+        Returns:
+            RawNewsItem instance
+        """
+        return cls(
+            symbol=symbol.upper(),
+            raw_json=article_data,
+            url=article_data.get("url", ""),
+            fetch_source="polygon",
+            metadata={
+                "external_id": article_data.get("id", ""),
+                "author": article_data.get("author", ""),
+                "publisher": article_data.get("publisher", ""),
+                "image_url": article_data.get("image_url", ""),
+                "amp_url": article_data.get("amp_url", ""),
+                "tickers": article_data.get("tickers", []),
+            }
+        )
+
     class Config:
         """Pydantic config."""
         use_enum_values = True
