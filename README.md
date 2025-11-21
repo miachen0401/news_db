@@ -1,410 +1,278 @@
-# Data Engine
+# News Database - LLM Categorization System
 
-Automated news fetching, processing, and storage system for the Talkative stock news platform.
+Automated general news fetching with LLM-based categorization for financial news analysis.
 
 ## Overview
 
-The Data Engine provides a complete pipeline for:
-1. **Fetching news** from multiple sources (APIs + web scraping)
+The system provides a complete pipeline for:
+1. **Fetching general market news** from multiple sources (Finnhub, Polygon)
 2. **Storing raw data** in a data lake (stock_news_raw table)
-3. **Processing** raw HTML/JSON into structured format
-4. **Storing processed data** in the stock_news table
-5. **Scheduled updates** running daily for all user watchlists
+3. **LLM categorization** using Zhipu AI GLM-4-flash (15 categories)
+4. **Storing categorized news** in stock_news table (filters out NON_FINANCIAL)
+5. **Incremental updates** based on actual news publication timestamps
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      Data Engine Flow                        │
+│                  LLM-Based News Pipeline                     │
 └─────────────────────────────────────────────────────────────┘
 
-1. FETCH (APIs/Web Scraping)
-   ├─ Finnhub API (60 calls/min)
-   ├─ Polygon API (5 calls/min)
-   ├─ NewsAPI (100 calls/day)
-   ├─ YFinance (unlimited)
-   └─ Future: Reuters, Bloomberg scraping
+1. FETCH (General Market News)
+   ├─ Finnhub API (general news, no symbol filter)
+   │  └─ Client-side filtering by timestamp
+   └─ Polygon API (general news with date range)
+      └─ Server-side filtering by timestamp
 
 2. STORE RAW (Data Lake)
    └─ stock_news_raw table
-      ├─ raw_html (web scraping)
       ├─ raw_json (API responses)
-      ├─ metadata (API limits, versions)
-      └─ processing_status (pending/processing/completed/failed)
+      ├─ published_at (actual news publish time)
+      ├─ fetch_source (finnhub, polygon)
+      └─ processing_status (pending/completed/failed)
 
-3. PROCESS (HTML/JSON → Structured)
-   ├─ Extract title, summary, date, source
-   ├─ Parse different API response formats
-   ├─ Parse HTML with BeautifulSoup
-   └─ Deduplicate by URL hash
+3. LLM CATEGORIZATION (Zhipu AI GLM-4-flash)
+   ├─ 15 categories (MACRO_ECONOMIC, EARNINGS_FINANCIALS, etc.)
+   ├─ Primary category (main news type)
+   ├─ Secondary category (stock symbols mentioned)
+   └─ Filter NON_FINANCIAL news
 
-4. STORE PROCESSED (Production Data)
-   └─ stock_news table (LIFO stack)
-      ├─ Top 5 news per symbol
-      ├─ Auto-archive position 6+
-      └─ Sentiment analysis ready
+4. STORE CATEGORIZED (Production Data)
+   └─ stock_news table
+      ├─ All financial news stored (no LIFO stack)
+      ├─ category (primary classification)
+      ├─ secondary_category (stock symbols)
+      └─ Ready for downstream analysis
 
-5. SCHEDULE
-   └─ Daily at midnight
-      ├─ Fetch news for all watchlists
-      ├─ Include top 10 popular companies
-      └─ Process immediately
+5. INCREMENTAL UPDATES
+   └─ Timestamp-based fetching
+      ├─ Tracks latest news published_at per source
+      ├─ 1-minute overlap buffer (avoid gaps)
+      └─ No duplicate fetching
 ```
 
-## Directory Structure
+## Setup
 
-```
-news_db/
-├── __init__.py              # Main exports
-├── README.md                # This file
-├── SETUP.md                 # Setup and installation guide
-├── test_fetch_news.py       # Test script
-├── schema.sql               # Main database schema
-├── schema_stock_news.sql    # Stock news table schema
-├── pyproject.toml           # UV project configuration
-├── .env                     # Environment variables (not in git)
-│
-├── models/                  # Data models
-│   ├── __init__.py
-│   └── raw_news.py         # RawNewsItem, ProcessingStatus
-│
-├── fetchers/               # News fetching
-│   ├── __init__.py
-│   └── finnhub_fetcher.py  # FinnhubNewsFetcher (Finnhub API)
-│
-├── processors/             # Data processing
-│   ├── __init__.py
-│   └── news_processor.py   # NewsProcessor (HTML/JSON → structured)
-│
-├── storage/                # Database operations
-│   ├── __init__.py
-│   └── raw_news_storage.py # RawNewsStorage (stock_news_raw table)
-│
-└── db/                     # Database layer
-    ├── __init__.py
-    └── stock_news.py       # StockNewsDB (stock_news table)
-```
-
-## Database Schema
-
-### stock_news_raw (Data Lake)
-
-Stores unprocessed news data from all sources.
-
-```sql
-CREATE TABLE stock_news_raw (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    symbol TEXT NOT NULL,                    -- Stock ticker
-    raw_html TEXT,                           -- HTML from web scraping
-    raw_json JSONB,                          -- JSON from APIs
-    url TEXT NOT NULL,                       -- Source URL
-    fetch_source TEXT NOT NULL,              -- finnhub, polygon, reuters, etc.
-    fetched_at TIMESTAMPTZ NOT NULL,         -- When fetched
-    is_processed BOOLEAN DEFAULT FALSE,      -- Processing flag
-    processed_at TIMESTAMPTZ,                -- When processed
-    processing_status TEXT DEFAULT 'pending', -- pending/processing/completed/failed
-    error_log TEXT,                          -- Error messages
-    metadata JSONB DEFAULT '{}'::jsonb,      -- Additional metadata
-    content_hash TEXT,                       -- Deduplication hash
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Key indexes
-CREATE INDEX idx_stock_news_raw_symbol ON stock_news_raw(symbol);
-CREATE INDEX idx_stock_news_raw_unprocessed ON stock_news_raw(is_processed, created_at DESC) WHERE is_processed = FALSE;
-CREATE INDEX idx_stock_news_raw_content_hash ON stock_news_raw(content_hash);
-```
-
-### stock_news (Production)
-
-Stores processed, structured news (existing table, LIFO stack).
-
-## Installation
-
-### Quick Start
+### 1. Install Dependencies
 
 ```bash
-# Install uv (if not already installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Sync dependencies
+# Using UV package manager
 uv sync
-
-# Run the schema files in your Supabase SQL editor
-# 1. schema.sql
-# 2. schema_stock_news.sql
-
-# Configure .env file with your credentials
-SUPABASE_NEWS_URL=<your_url>
-SUPABASE_NEWS_KEY=<your_key>
-FINNHUB_API_KEY=<your_key>
-
-# Run test
-uv run python test_fetch_news.py
 ```
 
-See [SETUP.md](SETUP.md) for detailed installation and configuration instructions.
+### 2. Environment Variables
+
+Create a `.env` file:
+
+```bash
+# Supabase
+SUPABASE_NEWS_URL=your_supabase_url
+SUPABASE_NEWS_KEY=your_supabase_key
+
+# News APIs
+FINNHUB_API_KEY=your_finnhub_key
+MASSIVE_API_KEY=your_polygon_key  # Polygon.io
+
+# LLM API
+ZHIPU_API_KEY=your_zhipu_key  # Zhipu AI for categorization
+```
+
+### 3. Database Schema
+
+Run migrations in Supabase SQL Editor:
+
+```bash
+# Initial schema
+cat schema.sql
+cat schema_stock_news.sql
+cat schema_fetch_state.sql
+
+# Add published_at column to raw table
+cat migration_add_and_backfill_published_at.sql
+
+# Add secondary_category for stock symbols
+cat alter_add_secondary_category.sql
+```
 
 ## Usage
 
-### Basic Usage
+### Initial Database Setup
 
-```python
-import os
-from supabase import create_client
-from fetchers.finnhub_fetcher import FinnhubNewsFetcher
-from storage.raw_news_storage import RawNewsStorage
-from processors.news_processor import NewsProcessor
-from db.stock_news import StockNewsDB
-
-# Initialize Supabase client
-supabase = create_client(
-    os.getenv("SUPABASE_NEWS_URL"),
-    os.getenv("SUPABASE_NEWS_KEY")
-)
-
-# Initialize components
-fetcher = FinnhubNewsFetcher(api_key=os.getenv("FINNHUB_API_KEY"))
-raw_storage = RawNewsStorage(client=supabase)
-stock_news_db = StockNewsDB(client=supabase)
-processor = NewsProcessor(stock_news_db=stock_news_db, raw_storage=raw_storage)
-```
-
-### Fetch for Single Symbol
-
-```python
-# Fetch news for AAPL (last 7 days)
-raw_items = await fetcher.fetch_for_symbol(symbol="AAPL", days_back=7)
-stats = await raw_storage.bulk_insert(raw_items)
-print(f"Fetched: {len(raw_items)}, Stored: {stats['inserted']}")
-```
-
-### Process Unprocessed News
-
-```python
-# Process up to 100 unprocessed raw news items
-stats = await processor.process_unprocessed_batch(limit=100)
-print(f"Processed: {stats['processed']}, Failed: {stats['failed']}")
-```
-
-### Get Statistics
-
-```python
-# Get raw storage statistics
-stats = await raw_storage.get_stats()
-print(f"Total: {stats['total']}, Pending: {stats['pending']}")
-
-# Get stock news statistics
-news_stats = await stock_news_db.get_stats()
-print(f"Total processed news: {news_stats['total']}")
-```
-
-## Components
-
-### 1. FinnhubNewsFetcher (fetchers/finnhub_fetcher.py)
-
-Fetches news from Finnhub API.
-
-**Supported API:**
-- **Finnhub**: 60 calls/min, company news
-
-**Key Methods:**
-- `fetch_for_symbol()` - Fetch news for one symbol
-- `fetch_for_symbols()` - Fetch for multiple symbols
-
-### 2. NewsProcessor (processors/news_processor.py)
-
-Converts raw HTML/JSON to structured format.
-
-**Capabilities:**
-- Parse Finnhub JSON format
-- Extract structured data (title, summary, date, source)
-- Convert raw data to processed format
-
-**Key Methods:**
-- `process_raw_item()` - Process single raw news item
-- `process_unprocessed_batch()` - Process multiple items
-
-### 3. RawNewsStorage (storage/raw_news_storage.py)
-
-Database operations for stock_news_raw table.
-
-**Key Methods:**
-- `insert()` - Insert single raw news item
-- `bulk_insert()` - Insert multiple items
-- `get_unprocessed()` - Get pending items
-- `get_by_symbol()` - Get all raw news for symbol
-- `update_processing_status()` - Update status
-- `check_duplicate()` - Check if content_hash exists
-- `delete_old_processed()` - Cleanup old data
-- `get_stats()` - Storage statistics
-
-### 4. StockNewsDB (db/stock_news.py)
-
-Database operations for stock_news table.
-
-**Key Methods:**
-- `push_news_to_stack()` - Push to LIFO stack (position 1)
-- `get_news_stack()` - Get news stack (positions 1-5)
-- `check_duplicate_url()` - Check if URL exists
-- `get_stats()` - Get storage statistics
-
-## Testing
-
-### Manual Test Script
+For a **new/empty database**, use this script to fetch news from a specific date:
 
 ```bash
-# Run manual test
-uv run python test_news_engine.py
+# Edit TARGET_DATE in the file (default: 2025-11-22)
+uv run python test_fetch_llm_for_new_databse.py
 ```
 
-This tests:
-1. Watchlist statistics
-2. Single symbol fetch (AAPL)
-3. Raw storage stats
-4. Processing unprocessed news
-5. Mini daily update (2 symbols)
-6. Final statistics
+This will:
+- Fetch all news from the target date
+- Categorize with LLM
+- Store in database
+- Record timestamp for incremental fetching
 
-### Unit Tests
+### Production: Incremental Fetching
+
+For **ongoing updates**, use the incremental fetcher:
 
 ```bash
-# Run unit tests
-uv run python -m pytest tests/backend/news_engine/ -v
+uv run python fetch_incremental_llm.py
 ```
 
-Tests include:
-- NewsProcessor for all API formats
-- RawNewsItem model validation
-- Content hash generation
-- Processing state management
-- Batch processing
+Run this regularly (every 15-30 minutes or hourly). It will:
+- Fetch only new news (after last timestamp)
+- Categorize with LLM (batches of 20)
+- Store financial news (skip NON_FINANCIAL)
+- Update timestamp for next run
 
-## Deduplication Strategy
+**Recommended Schedule:**
+- Every 15-30 minutes for real-time updates
+- Every 1 hour for moderate freshness
+- Multiple times per day for daily summaries
 
-### Level 1: Raw Data (stock_news_raw)
+## Configuration
 
-Deduplication by `content_hash` (MD5 of URL):
-- Check before insert
-- Skip if hash exists
-- Prevents duplicate fetches
-
-### Level 2: Processed Data (stock_news)
-
-Deduplication by URL:
-- Check before pushing to stack
-- Skip if URL exists
-- Prevents duplicate articles in production
-
-## Error Handling
-
-### Processing Failures
-
-Items that fail processing are marked with:
-- `processing_status = 'failed'`
-- `error_log` contains error message
-- Can be retried or inspected manually
-
-### Fetch Failures
-
-API fetch failures:
-- Logged but don't stop the pipeline
-- Other sources continue
-- Partial results are still stored
-
-## Data Retention
-
-### Raw Data Cleanup
+Edit `config.py` to adjust settings:
 
 ```python
-# Delete processed raw news older than 30 days
-deleted_count = engine.raw_storage.delete_old_processed(days=30)
+# LLM Processing Configuration
+LLM_CONFIG = {
+    "batch_size": 10,              # Items per LLM API call
+    "processing_limit": 20,        # Max items to process per run
+    "temperature": 0.3,            # LLM consistency
+}
+
+# News Fetching Configuration
+FETCH_CONFIG = {
+    "polygon_limit": 100,          # Max articles from Polygon
+    "finnhub_limit": 100,          # Finnhub article limit
+    "buffer_minutes": 1,           # Overlap window
+}
 ```
 
-Keeps the data lake clean while preserving recent data for inspection.
+## LLM Categories
 
-## Performance Considerations
+The system uses 15 categories:
 
-### Concurrent Fetching
+1. **MACRO_ECONOMIC** - Macroeconomic indicators
+2. **CENTRAL_BANK_POLICY** - Monetary policy, interest rates
+3. **MACRO_NOBODY** - Geopolitical commentary (no specific leaders)
+4. **GEOPOLITICAL_SPECIFIC** - Named countries/leaders/governments
+5. **INDUSTRY_REGULATION** - Regulatory news for specific sectors
+6. **EARNINGS_FINANCIALS** - Earnings, revenue, financial statements
+7. **CORPORATE_ACTIONS** - M&A, stock splits, buybacks
+8. **MANAGEMENT_CHANGES** - CEO, CFO, board changes
+9. **PRODUCT_TECH_UPDATE** - New products, R&D, launches
+10. **BUSINESS_OPERATIONS** - Supply chain, contracts, partnerships
+11. **ACCIDENT_INCIDENT** - Breaches, accidents, recalls, lawsuits
+12. **ANALYST_RATING** - Analyst upgrades/downgrades
+13. **MARKET_SENTIMENT** - Investor sentiment, market flows
+14. **COMMODITY_FOREX_CRYPTO** - Commodities, forex, crypto
+15. **NON_FINANCIAL** - Non-market news (filtered out)
 
-The engine fetches news concurrently:
-- Multiple symbols in parallel
-- Multiple APIs per symbol in parallel
-- Async/await throughout
+## Database Tables
 
-### Rate Limiting
+### stock_news_raw
+- Staging area for raw API responses
+- Stores `published_at` (actual news time)
+- Tracks processing status
 
-Respects API rate limits:
-- Finnhub: 60 calls/min
-- Polygon: 5 calls/min
-- NewsAPI: 100 calls/day
-- YFinance: No limit
+### stock_news
+- Production table with categorized news
+- No LIFO stack (all news stored)
+- `category` - Primary LLM category
+- `secondary_category` - Stock symbols mentioned
 
-### Caching
+### fetch_state
+- Tracks last fetch timestamp per source
+- Enables incremental fetching
+- Records articles fetched/stored
 
-Processed news is cached in Redis (2-minute TTL) by the existing stock news service.
+## File Structure
 
-## Future Enhancements
+```
+news_db/
+├── fetch_incremental_llm.py           # Production script
+├── test_fetch_llm_for_new_databse.py  # Initial setup script
+│
+├── fetchers/
+│   └── general_news_fetcher.py        # Finnhub + Polygon
+│
+├── processors/
+│   └── llm_news_processor.py          # LLM categorization
+│
+├── services/
+│   └── llm_categorizer.py             # Zhipu AI integration
+│
+├── db/
+│   └── stock_news.py                  # Database operations
+│
+├── storage/
+│   ├── raw_news_storage.py            # Raw data staging
+│   └── fetch_state_manager.py         # Timestamp tracking
+│
+├── models/
+│   └── raw_news.py                    # Data models
+│
+└── config.py                          # Configuration
+```
 
-1. **Web Scraping**
-   - Add Reuters scraper
-   - Add Bloomberg scraper
-   - Add MarketWatch scraper
+## API Rate Limits
 
-2. **Sentiment Analysis**
-   - Process sentiment scores during processing
-   - Store in stock_news table
-   - Use for filtering and ranking
+- **Finnhub**: ~100 articles per request (no date filtering)
+- **Polygon**: 5 requests/min (free tier), date filtering supported
+- **Zhipu AI**: 10 items per batch for categorization
 
-3. **Category Classification**
-   - Auto-categorize news (earnings, product launch, etc.)
-   - Machine learning classification
-   - Tag with topics
+## Monitoring
 
-4. **Smart Scheduling**
-   - Fetch more frequently for active trading hours
-   - Reduce frequency after hours
-   - Prioritize high-volume watchlist symbols
+Check fetch status:
 
-5. **News Trends**
-   - Detect trending topics
-   - Alert on breaking news
-   - Cross-symbol correlation
+```sql
+-- Last fetch times
+SELECT * FROM fetch_state ORDER BY updated_at DESC;
+
+-- Raw news pending processing
+SELECT COUNT(*) FROM stock_news_raw WHERE processing_status = 'pending';
+
+-- Category distribution
+SELECT category, COUNT(*)
+FROM stock_news
+GROUP BY category
+ORDER BY COUNT(*) DESC;
+```
 
 ## Troubleshooting
 
-### "No news fetched"
+### Duplicate News
+- System tracks `published_at` (news time), not fetch time
+- Finnhub: Client-side filtering
+- Polygon: Server-side with full timestamp (YYYY-MM-DDTHH:MM:SSZ)
 
-Check:
-1. API keys are configured (env_files/)
-2. Network connectivity
-3. API rate limits not exceeded
-4. Symbols are valid tickers
+### Missing published_at
+- Run `migration_add_and_backfill_published_at.sql`
+- Backfills from `raw_json` for existing records
 
-### "Processing failed"
+### LLM API Errors
+- Check `ZHIPU_API_KEY` in `.env`
+- Monitor rate limits (10 items/batch, ~1s delay)
+- Failed items logged with `processing_status = 'failed'`
 
-Check:
-1. Raw data format matches expected schema
-2. Required fields (title, URL) are present
-3. Date parsing succeeded
-4. Error log in stock_news_raw table
+## Documentation
 
-### "Duplicates not being skipped"
+- `docs/CODE_CLEANUP_2025-11-22.md` - System migration details
+- `docs/FIX_Database_Docs.md` - Database fixes and migrations
+- `docs/RECORD_Change.md` - Complete change history
+- `news_category.txt` - Full category definitions
 
-Check:
-1. content_hash is being generated
-2. Index on content_hash exists
-3. URL format is consistent (http vs https, trailing slash)
+## Recent Changes
 
-## Support
-
-For issues or questions:
-1. Check logs in scheduler output
-2. Query stock_news_raw table for error_log
-3. Run test_news_engine.py for diagnostics
-4. Check API client documentation
+**2025-11-22:**
+- ✅ Migrated to LLM-based categorization (from symbol-specific)
+- ✅ Removed LIFO stack (now stores all news)
+- ✅ Added `published_at` tracking for proper incremental fetching
+- ✅ Cleaned up ~1,500 lines of obsolete code
+- ✅ Fixed duplicate news issue with timestamp-based filtering
 
 ## License
 
-Internal use only.
+Internal project for financial news analysis.

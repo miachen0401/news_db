@@ -18,6 +18,44 @@ class FetchStateManager:
         self.client = client
         self.table_name = "fetch_state"
 
+    async def get_latest_news_timestamp(
+        self,
+        symbol: str,
+        fetch_source: str
+    ) -> Optional[datetime]:
+        """
+        Get the latest published_at timestamp from stock_news_raw for a source.
+
+        Args:
+            symbol: Stock ticker symbol
+            fetch_source: Source name (finnhub, polygon, etc.)
+
+        Returns:
+            Latest published_at datetime or None if no news found
+        """
+        try:
+            def _fetch():
+                return (
+                    self.client
+                    .table("stock_news_raw")
+                    .select("published_at")
+                    .eq("symbol", symbol.upper())
+                    .eq("fetch_source", fetch_source)
+                    .order("published_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+
+            result = await asyncio.to_thread(_fetch)
+
+            if result.data and len(result.data) > 0:
+                return datetime.fromisoformat(result.data[0]["published_at"])
+
+        except Exception as e:
+            print(f"⚠️  Error getting latest news timestamp: {e}")
+
+        return None
+
     async def get_last_fetch_time(
         self,
         symbol: str,
@@ -36,6 +74,24 @@ class FetchStateManager:
             Tuple of (from_time, to_time) for incremental fetch
             If no previous fetch, returns (7 days ago, now)
         """
+        # Try to get the latest news timestamp from actual fetched news
+        latest_news_time = await self.get_latest_news_timestamp(symbol, fetch_source)
+
+        if latest_news_time:
+            # Use actual latest news timestamp (with buffer for overlap)
+            from_time = latest_news_time - timedelta(minutes=buffer_minutes)
+            to_time = datetime.now()
+
+            # Strip timezone if present
+            if from_time.tzinfo:
+                from_time = from_time.replace(tzinfo=None)
+            if to_time.tzinfo:
+                to_time = to_time.replace(tzinfo=None)
+
+            print(f"📍 {symbol} ({fetch_source}): Incremental from latest news {latest_news_time.strftime('%Y-%m-%d %H:%M')}")
+            return from_time, to_time
+
+        # Fallback: check fetch_state table
         try:
             def _fetch():
                 return (

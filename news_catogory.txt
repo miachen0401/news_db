@@ -1,0 +1,64 @@
+LLM instructions for news catogory:
+use glm-4.5-flash model from ZHIPU AI, api key is ZHIPU_API_KEY in .env file.
+belows are Definition for each primary catogory (one label only). for secondary catogory, if the news is specific for certein stock/company, output will be the stcok name (can have multiple) else nothing.
+input will be multiple pieces of news summary, output will be the catogories only.
+
+1. MACRO_ECONOMIC
+
+News about macroeconomic indicators that affect the overall market.
+
+2. CENTRAL_BANK_POLICY
+
+News about monetary policy, interest rates, or central bank decisions/statements.
+
+3. MACRO_NOBODY
+
+Geopolitical or macro commentary without naming any specific leader or institution (broad sentiment only).
+
+4. GEOPOLITICAL_SPECIFIC
+
+Geopolitical news involving named countries, leaders, governments, or official organizations.
+
+5. INDUSTRY_REGULATION
+
+Regulatory or policy news that targets a specific industry or sector.
+
+6. EARNINGS_FINANCIALS
+
+Company earnings, financial statements, guidance, and revenue-related data.
+
+7. CORPORATE_ACTIONS
+
+Corporate structural events such as mergers, acquisitions, stock splits, buybacks, spinoffs, or bankruptcies.
+
+8. MANAGEMENT_CHANGES
+
+Leadership or key personnel changes (CEO, CFO, board members, etc.).
+
+9. PRODUCT_TECH_UPDATE
+
+News about new products, technology developments, R&D progress, or product launches.
+
+10. BUSINESS_OPERATIONS
+
+Company operational updates: supply chain issues, contracts won/lost, partnerships, factory changes, or operational decisions.
+
+11. ACCIDENT_INCIDENT
+
+Unexpected negative events such as data breaches, accidents, product recalls, lawsuits, or major fines.
+
+12. ANALYST_RATING
+
+Analyst upgrades, downgrades, price target changes, or financial firm commentary.
+
+13. MARKET_SENTIMENT
+
+News describing investor sentiment, market flows, surveys, and general risk appetite.
+
+14. COMMODITY_FOREX_CRYPTO
+
+News about commodities, foreign exchange, or cryptocurrency markets.
+
+15. NON_FINANCIAL
+
+All news irrelevant to financial markets or unlikely to affect stock prices (sports, lifestyle, entertainment, general culture, human interest, non-market-related commentary).

@@ -30,6 +30,7 @@ class RawNewsItem(BaseModel):
     url: str = Field(..., description="Source URL")
     fetch_source: str = Field(..., description="Source API (finnhub, polygon, etc.)")
     fetched_at: datetime = Field(default_factory=datetime.now, description="When fetched")
+    published_at: Optional[datetime] = Field(None, description="Actual news publication time")
 
     # Processing state
     is_processed: bool = Field(default=False, description="Processing flag")
@@ -75,6 +76,7 @@ class RawNewsItem(BaseModel):
             "url": self.url,
             "fetch_source": self.fetch_source,
             "fetched_at": self.fetched_at.isoformat(),
+            "published_at": self.published_at.isoformat() if self.published_at else None,
             "is_processed": self.is_processed,
             "processed_at": self.processed_at.isoformat() if self.processed_at else None,
             "processing_status": self.processing_status.value,
@@ -101,11 +103,17 @@ class RawNewsItem(BaseModel):
         Returns:
             RawNewsItem instance
         """
+        # Extract published_at from Finnhub's 'datetime' field (Unix timestamp)
+        published_at = None
+        if 'datetime' in article_data:
+            published_at = datetime.fromtimestamp(article_data['datetime'])
+
         return cls(
             symbol=symbol.upper(),
             raw_json=article_data,
             url=article_data.get("url", ""),
             fetch_source="finnhub",
+            published_at=published_at,
             metadata={
                 "external_id": str(article_data.get("id", "")),
                 "category": article_data.get("category", ""),
@@ -130,11 +138,17 @@ class RawNewsItem(BaseModel):
         Returns:
             RawNewsItem instance
         """
+        # Extract published_at from Polygon's 'published_utc' field (ISO string)
+        published_at = None
+        if 'published_utc' in article_data:
+            published_at = datetime.fromisoformat(article_data['published_utc'].replace('Z', '+00:00'))
+
         return cls(
             symbol=symbol.upper(),
             raw_json=article_data,
             url=article_data.get("url", ""),
             fetch_source="polygon",
+            published_at=published_at,
             metadata={
                 "external_id": article_data.get("id", ""),
                 "author": article_data.get("author", ""),

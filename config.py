@@ -1,33 +1,15 @@
-"""Configuration for news fetching."""
+"""Configuration for LLM-based news categorization system."""
 
-# Symbols to fetch news for
-# Add or remove symbols as needed
-DEFAULT_SYMBOLS = [
-    "AAPL",   # Apple
-    "TSLA",   # Tesla
-    #"GOOGL",  # Google
-    #"MSFT",   # Microsoft
-    "NVDA",   # NVIDIA
-    #"META",   # Meta
-    #"AMZN",   # Amazon
-]
+# LLM Processing Configuration
+LLM_CONFIG = {
+    "batch_size": 10,              # Items per LLM API call
+    "processing_limit": 20,        # Max items to process per incremental run
+    "temperature": 0.3,            # LLM temperature (lower = more consistent)
+}
 
-# Top market cap stocks (optional additional list)
-TOP_STOCKS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
-    "META", "TSLA", "BRK.B", "V", "JPM"
-]
-
-# Tech stocks
-TECH_STOCKS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
-    "META", "TSLA", "AMD", "INTC", "ORCL"
-]
-
-# Fetch settings
+# News Fetching Configuration
 FETCH_CONFIG = {
-    "days_back": 1,          # How many days back to fetch
-    "polygon_limit": 30,     # Max articles per symbol from Polygon
-    "finnhub_limit": 20,     # Finnhub auto-limits to 20
-    "batch_size": 100,       # Processing batch size
+    "polygon_limit": 100,          # Max articles from Polygon per fetch
+    "finnhub_limit": 100,          # Finnhub returns ~100 latest articles
+    "buffer_minutes": 1,           # Overlap window for incremental fetching (avoid gaps)
 }

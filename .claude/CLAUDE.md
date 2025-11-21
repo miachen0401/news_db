@@ -1,5 +1,5 @@
 ## authorized edits:
-1. ask when need to do rf-m
+1. always ask when need to do rm -f for any files/folders.
 
 ## Documentation: All saved in "docs/"
 ### README.md
