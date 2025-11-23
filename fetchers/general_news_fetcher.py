@@ -1,5 +1,5 @@
 """General news fetcher without symbol filtering."""
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 from datetime import datetime, timedelta
 import httpx
 
@@ -24,74 +24,76 @@ class GeneralNewsFetcher:
 
     async def fetch_finnhub_general_news(
         self,
-        category: str = "general",
-        min_id: int = 0,
-        after_timestamp: datetime = None
-    ) -> List[RawNewsItem]:
+        categories: List[str] = None,
+        min_id: int = 0
+    ) -> Tuple[List[RawNewsItem], int]:
         """
-        Fetch general market news from Finnhub.
+        Fetch general market news from Finnhub across multiple categories.
 
-        Note: Finnhub API always returns latest 100 articles, doesn't support date filtering.
-        We filter client-side using after_timestamp.
+        Note: Finnhub API returns latest ~100 articles per category.
+        Uses minId parameter for incremental fetching (fetches news with ID > minId).
 
         Args:
-            category: News category (general, forex, crypto, merger)
-            min_id: Minimum news ID for pagination
-            after_timestamp: Only return news published after this time (client-side filter)
+            categories: List of news categories to fetch (general, forex, crypto, merger)
+            min_id: Minimum news ID for incremental fetching (fetch news with ID > minId)
 
         Returns:
-            List of RawNewsItem objects
+            Tuple of (List of RawNewsItem objects, max_id seen)
         """
-        try:
-            print(f"🔍 Fetching Finnhub general news (category: {category})...")
+        if categories is None:
+            categories = ["general"]
 
-            response = await self.finnhub_client.get(
-                "https://finnhub.io/api/v1/news",
-                params={
-                    "category": category,
-                    "minId": min_id,
-                    "token": self.finnhub_api_key
-                }
-            )
+        all_raw_items = []
+        max_id_seen = min_id
 
-            if response.status_code == 200:
-                articles = response.json()
+        for category in categories:
+            try:
+                print(f"🔍 Fetching Finnhub '{category}' news (minId={min_id})...")
 
-                raw_items = []
-                for article in articles:
-                    try:
-                        # Use factory method to create RawNewsItem (extracts published_at)
-                        raw_item = RawNewsItem.from_finnhub_response(
-                            symbol="GENERAL",
-                            article_data=article
-                        )
+                response = await self.finnhub_client.get(
+                    "https://finnhub.io/api/v1/news",
+                    params={
+                        "category": category,
+                        "minId": min_id,
+                        "token": self.finnhub_api_key
+                    }
+                )
 
-                        # Client-side filtering: only include news after timestamp
-                        if after_timestamp and raw_item.published_at:
-                            # Strip timezone for comparison
-                            item_time = raw_item.published_at.replace(tzinfo=None) if raw_item.published_at.tzinfo else raw_item.published_at
-                            filter_time = after_timestamp.replace(tzinfo=None) if after_timestamp.tzinfo else after_timestamp
+                if response.status_code == 200:
+                    articles = response.json()
 
-                            if item_time <= filter_time:
-                                continue  # Skip this article (too old)
+                    raw_items = []
+                    for article in articles:
+                        try:
+                            # Track max ID for next incremental fetch
+                            article_id = article.get('id', 0)
+                            if article_id > max_id_seen:
+                                max_id_seen = article_id
 
-                        raw_items.append(raw_item)
-                    except Exception as e:
-                        print(f"⚠️  Error converting article: {e}")
-                        continue
+                            # Use factory method to create RawNewsItem (extracts published_at)
+                            raw_item = RawNewsItem.from_finnhub_response(
+                                symbol="GENERAL",
+                                article_data=article,
+                                category=category
+                            )
 
-                print(f"✅ Fetched {len(raw_items)} general news from Finnhub")
-                if after_timestamp:
-                    print(f"   (filtered: only news after {after_timestamp.strftime('%Y-%m-%d %H:%M:%S')})")
-                return raw_items
+                            raw_items.append(raw_item)
+                        except Exception as e:
+                            print(f"⚠️  Error converting article: {e}")
+                            continue
 
-            else:
-                print(f"⚠️  Finnhub API error: {response.status_code}")
-                return []
+                    print(f"✅ Fetched {len(raw_items)} news from Finnhub '{category}'")
+                    all_raw_items.extend(raw_items)
 
-        except Exception as e:
-            print(f"❌ Error fetching Finnhub general news: {e}")
-            return []
+                else:
+                    print(f"⚠️  Finnhub '{category}' API error: {response.status_code}")
+
+            except Exception as e:
+                print(f"❌ Error fetching Finnhub '{category}' news: {e}")
+
+        print(f"📊 Total Finnhub news: {len(all_raw_items)} (max_id: {max_id_seen})")
+
+        return all_raw_items, max_id_seen
 
     async def fetch_polygon_general_news(
         self,

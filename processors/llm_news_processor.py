@@ -6,6 +6,7 @@ from models.raw_news import RawNewsItem, ProcessingStatus
 from storage.raw_news_storage import RawNewsStorage
 from db.stock_news import StockNewsDB
 from services.llm_categorizer import NewsCategorizer
+from config import LLM_CONFIG
 
 
 class LLMNewsProcessor:
@@ -258,7 +259,10 @@ class LLMNewsProcessor:
         if news_for_llm:
             print(f"🤖 Sending {len(news_for_llm)} items to LLM for categorization...")
 
-            categorized = await self.categorizer.categorize_batch(news_for_llm)
+            categorized = await self.categorizer.categorize_batch(
+                news_for_llm,
+                batch_size=LLM_CONFIG['batch_size']
+            )
             stats["categorized"] = len(categorized)
 
             # Process each categorized item

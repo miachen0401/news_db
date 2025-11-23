@@ -1,8 +1,12 @@
 """Fetch state manager for incremental news fetching."""
 from typing import Optional, Dict, Any, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import Client
 import asyncio
+
+# EST timezone (UTC-5) - for display only
+EST = timezone(timedelta(hours=-5))
+UTC = timezone.utc
 
 
 class FetchStateManager:
@@ -79,16 +83,17 @@ class FetchStateManager:
 
         if latest_news_time:
             # Use actual latest news timestamp (with buffer for overlap)
+            # All timestamps stored in UTC, work in UTC
             from_time = latest_news_time - timedelta(minutes=buffer_minutes)
-            to_time = datetime.now()
+            to_time = datetime.now(UTC).replace(tzinfo=None)  # Current time in UTC
 
             # Strip timezone if present
             if from_time.tzinfo:
                 from_time = from_time.replace(tzinfo=None)
-            if to_time.tzinfo:
-                to_time = to_time.replace(tzinfo=None)
 
-            print(f"📍 {symbol} ({fetch_source}): Incremental from latest news {latest_news_time.strftime('%Y-%m-%d %H:%M')}")
+            # Display in EST for user
+            latest_est = latest_news_time.replace(tzinfo=UTC).astimezone(EST)
+            print(f"📍 {symbol} ({fetch_source}): Incremental from latest news {latest_est.strftime('%Y-%m-%d %H:%M')} EST")
             return from_time, to_time
 
         # Fallback: check fetch_state table
@@ -110,10 +115,13 @@ class FetchStateManager:
                 last_fetch_to = datetime.fromisoformat(result.data["last_fetch_to"])
 
                 # Subtract buffer to create overlap window (avoid missing news)
+                # Work in UTC
                 from_time = last_fetch_to - timedelta(minutes=buffer_minutes)
-                to_time = datetime.now()
+                to_time = datetime.now(UTC).replace(tzinfo=None)  # Current time in UTC
 
-                print(f"📍 {symbol} ({fetch_source}): Incremental fetch from {from_time.strftime('%Y-%m-%d %H:%M')}")
+                # Display in EST for user
+                from_est = from_time.replace(tzinfo=UTC).astimezone(EST)
+                print(f"📍 {symbol} ({fetch_source}): Incremental fetch from {from_est.strftime('%Y-%m-%d %H:%M')} EST")
                 return from_time, to_time
 
         except Exception as e:
@@ -121,11 +129,48 @@ class FetchStateManager:
             pass
 
         # Default: fetch yesterday only (last 24 hours)
-        to_time = datetime.now()
+        to_time = datetime.now(UTC).replace(tzinfo=None)  # Current time in UTC
         from_time = to_time - timedelta(days=1)
 
         print(f"🆕 {symbol} ({fetch_source}): First fetch, getting last 24 hours")
         return from_time, to_time
+
+    async def get_finnhub_max_id(
+        self,
+        symbol: str,
+        fetch_source: str
+    ) -> Optional[int]:
+        """
+        Get the last Finnhub max ID for incremental fetching.
+
+        Args:
+            symbol: Stock ticker symbol
+            fetch_source: Source name (should be 'finnhub')
+
+        Returns:
+            Last max ID or None if not found
+        """
+        try:
+            def _fetch():
+                return (
+                    self.client
+                    .table(self.table_name)
+                    .select("finnhub_max_id")
+                    .eq("symbol", symbol.upper())
+                    .eq("fetch_source", fetch_source)
+                    .single()
+                    .execute()
+                )
+
+            result = await asyncio.to_thread(_fetch)
+
+            if result.data and result.data.get("finnhub_max_id"):
+                return result.data["finnhub_max_id"]
+
+        except Exception:
+            pass
+
+        return None
 
     async def update_fetch_state(
         self,
@@ -136,7 +181,8 @@ class FetchStateManager:
         articles_fetched: int,
         articles_stored: int,
         status: str = "success",
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        finnhub_max_id: Optional[int] = None
     ) -> bool:
         """
         Update fetch state after successful fetch.
@@ -150,6 +196,7 @@ class FetchStateManager:
             articles_stored: Number of articles stored (after dedup)
             status: Status (success/failed/partial)
             error_message: Optional error message
+            finnhub_max_id: Optional Finnhub max news ID (for incremental fetching)
 
         Returns:
             True if update successful
@@ -164,8 +211,12 @@ class FetchStateManager:
                 "articles_stored": articles_stored,
                 "status": status,
                 "error_message": error_message,
-                "updated_at": datetime.now().isoformat(),
+                "updated_at": datetime.now(UTC).replace(tzinfo=None).isoformat(),
             }
+
+            # Add finnhub_max_id if provided (Finnhub only)
+            if finnhub_max_id is not None:
+                data["finnhub_max_id"] = finnhub_max_id
 
             def _upsert():
                 return (

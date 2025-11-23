@@ -1,0 +1,8 @@
+for daily summary:
+sync time zone to EST as needed.
+
+1. provide daily highlights for a given [date] and [time] in EST:
+use glm-4.5-flash for summarizing daily highlight.
+contents used for highlights: 
+1. exclude news with category from "MACRO_NOBODY".
+2. get all news summary published from 6PM EST the date before [date] to [time] EST on the [date].

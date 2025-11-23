@@ -1,10 +1,14 @@
 """Data models for raw news items."""
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from enum import Enum
 import hashlib
 import json
+
+# EST timezone (UTC-5) - for display only
+EST = timezone(timedelta(hours=-5))
+UTC = timezone.utc
 
 
 class ProcessingStatus(str, Enum):
@@ -91,7 +95,8 @@ class RawNewsItem(BaseModel):
     def from_finnhub_response(
         cls,
         symbol: str,
-        article_data: Dict[str, Any]
+        article_data: Dict[str, Any],
+        category: str = "general"
     ) -> "RawNewsItem":
         """
         Create RawNewsItem from Finnhub API response.
@@ -99,20 +104,22 @@ class RawNewsItem(BaseModel):
         Args:
             symbol: Stock ticker symbol
             article_data: Article data from Finnhub
+            category: Finnhub category (general, merger, forex, crypto)
 
         Returns:
             RawNewsItem instance
         """
-        # Extract published_at from Finnhub's 'datetime' field (Unix timestamp)
+        # Extract published_at from Finnhub's 'datetime' field (Unix timestamp in UTC)
+        # Store as naive UTC (Supabase will treat as UTC)
         published_at = None
         if 'datetime' in article_data:
-            published_at = datetime.fromtimestamp(article_data['datetime'])
+            published_at = datetime.fromtimestamp(article_data['datetime'], tz=UTC).replace(tzinfo=None)
 
         return cls(
             symbol=symbol.upper(),
             raw_json=article_data,
             url=article_data.get("url", ""),
-            fetch_source="finnhub",
+            fetch_source=f"finnhub_{category}",
             published_at=published_at,
             metadata={
                 "external_id": str(article_data.get("id", "")),
@@ -138,10 +145,12 @@ class RawNewsItem(BaseModel):
         Returns:
             RawNewsItem instance
         """
-        # Extract published_at from Polygon's 'published_utc' field (ISO string)
+        # Extract published_at from Polygon's 'published_utc' field (ISO string in UTC)
+        # Store as naive UTC (Supabase will treat as UTC)
         published_at = None
         if 'published_utc' in article_data:
-            published_at = datetime.fromisoformat(article_data['published_utc'].replace('Z', '+00:00'))
+            utc_time = datetime.fromisoformat(article_data['published_utc'].replace('Z', '+00:00'))
+            published_at = utc_time.replace(tzinfo=None)
 
         return cls(
             symbol=symbol.upper(),

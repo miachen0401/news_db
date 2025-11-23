@@ -4,6 +4,8 @@ import httpx
 import json
 import asyncio
 
+from config import LLM_CONFIG
+
 
 class NewsCategorizer:
     """Categorizes news using Zhipu AI GLM-4.5-flash model."""
@@ -17,7 +19,7 @@ class NewsCategorizer:
         """
         self.api_key = api_key
         self.base_url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-        self.model = "glm-4-flash"
+        self.model = "glm-4.5-flash"
         self.client = httpx.AsyncClient(timeout=60.0)
 
     def _build_categorization_prompt(self, news_items: List[Dict[str, Any]]) -> str:
@@ -127,7 +129,7 @@ Output only the JSON array, no additional text."""
                                 "content": prompt
                             }
                         ],
-                        "temperature": 0.3,  # Lower temperature for more consistent categorization
+                        "temperature": LLM_CONFIG['temperature'],
                     }
                 )
 

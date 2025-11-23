@@ -9,7 +9,8 @@ LLM_CONFIG = {
 
 # News Fetching Configuration
 FETCH_CONFIG = {
-    "polygon_limit": 100,          # Max articles from Polygon per fetch
-    "finnhub_limit": 100,          # Finnhub returns ~100 latest articles
+    # Finnhub categories to fetch (will fetch from all listed categories)
+    "finnhub_categories": ['general', 'merger'],
+    "polygon_limit": 200,          # Max articles from Polygon per fetch
     "buffer_minutes": 1,           # Overlap window for incremental fetching (avoid gaps)
 }

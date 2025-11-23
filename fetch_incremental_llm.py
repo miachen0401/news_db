@@ -2,9 +2,13 @@
 import asyncio
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client
+
+# EST timezone (UTC-5) - for display only
+EST = timezone(timedelta(hours=-5))
+UTC = timezone.utc
 
 from fetchers.general_news_fetcher import GeneralNewsFetcher
 from storage.raw_news_storage import RawNewsStorage
@@ -12,6 +16,7 @@ from storage.fetch_state_manager import FetchStateManager
 from processors.llm_news_processor import LLMNewsProcessor
 from services.llm_categorizer import NewsCategorizer
 from db.stock_news import StockNewsDB
+from config import LLM_CONFIG, FETCH_CONFIG
 
 
 async def main():
@@ -19,7 +24,8 @@ async def main():
     print("=" * 70)
     print("📰 INCREMENTAL NEWS FETCHER (LLM Categorization)")
     print("=" * 70)
-    print(f"Run time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    now_est = datetime.now(UTC).astimezone(EST)
+    print(f"Run time: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     print()
 
     # Load environment
@@ -59,30 +65,19 @@ async def main():
     )
 
     # ========================================
-    # STEP 1: Get incremental fetch windows
+    # STEP 1: Get Polygon fetch window
     # ========================================
     print("-" * 70)
-    print("STEP 1: Determine Fetch Windows")
+    print("STEP 1: Get Polygon Fetch Window")
     print("-" * 70)
-
-    # Get last fetch times for both sources
-    finnhub_from, finnhub_to = await fetch_state.get_last_fetch_time(
-        symbol="GENERAL",
-        fetch_source="finnhub",
-        buffer_minutes=1
-    )
 
     polygon_from, polygon_to = await fetch_state.get_last_fetch_time(
         symbol="GENERAL",
         fetch_source="polygon",
-        buffer_minutes=1
+        buffer_minutes=FETCH_CONFIG['buffer_minutes']
     )
 
     # Strip timezone info for date formatting
-    if finnhub_from.tzinfo:
-        finnhub_from = finnhub_from.replace(tzinfo=None)
-    if finnhub_to.tzinfo:
-        finnhub_to = finnhub_to.replace(tzinfo=None)
     if polygon_from.tzinfo:
         polygon_from = polygon_from.replace(tzinfo=None)
     if polygon_to.tzinfo:
@@ -99,10 +94,31 @@ async def main():
 
     all_items = []
 
-    # Fetch from Finnhub (with client-side filtering)
+    # Fetch from Finnhub (multiple categories with minId for incremental fetching)
     print(f"\n🔍 Fetching Finnhub general news...")
-    finnhub_items = await general_fetcher.fetch_finnhub_general_news(
-        after_timestamp=finnhub_from
+
+    # Get the maximum min_id across all categories to use for fetching
+    # This ensures we don't re-fetch news we already have
+    max_min_ids = []
+    for category in FETCH_CONFIG['finnhub_categories']:
+        category_max_id = await fetch_state.get_finnhub_max_id(
+            symbol="GENERAL",
+            fetch_source=f"finnhub_{category}"
+        )
+        if category_max_id is not None:
+            max_min_ids.append(category_max_id)
+
+    # Use the highest max_id across all categories
+    last_min_id = max(max_min_ids) if max_min_ids else 0
+
+    if last_min_id == 0:
+        print(f"   First fetch - starting from minId=0")
+    else:
+        print(f"   Incremental fetch - using minId={last_min_id}")
+
+    finnhub_items, finnhub_max_id = await general_fetcher.fetch_finnhub_general_news(
+        categories=FETCH_CONFIG['finnhub_categories'],
+        min_id=last_min_id
     )
     all_items.extend(finnhub_items)
 
@@ -115,7 +131,7 @@ async def main():
     polygon_items = await general_fetcher.fetch_polygon_general_news(
         from_date=polygon_from_str,
         to_date=polygon_to_str,
-        limit=100
+        limit=FETCH_CONFIG['polygon_limit']
     )
     all_items.extend(polygon_items)
 
@@ -156,20 +172,23 @@ async def main():
     print("STEP 4: Update Fetch State")
     print("-" * 70)
 
-    # Calculate actual latest news timestamps from fetched items
-    if finnhub_items:
-        # Get max published_at from items (already extracted in RawNewsItem)
-        finnhub_latest = max(
-            (item.published_at for item in finnhub_items if item.published_at),
-            default=finnhub_to
+    # Update fetch state for each Finnhub category
+    # Finnhub only needs max_id tracking, no time windows
+    now = datetime.now(UTC).replace(tzinfo=None)  # Current time in UTC
+    for category in FETCH_CONFIG['finnhub_categories']:
+        category_source = f"finnhub_{category}"
+        category_items = [i for i in finnhub_items if i.fetch_source == category_source]
+
+        await fetch_state.update_fetch_state(
+            symbol="GENERAL",
+            fetch_source=category_source,
+            from_time=now,  # Not used for Finnhub, just for record
+            to_time=now,    # Not used for Finnhub, just for record
+            articles_fetched=len(category_items),
+            articles_stored=len(category_items),
+            status="success",
+            finnhub_max_id=finnhub_max_id  # This is what matters for Finnhub
         )
-        # Strip timezone if present
-        if finnhub_latest and finnhub_latest.tzinfo:
-            finnhub_latest = finnhub_latest.replace(tzinfo=None)
-        elif not finnhub_latest:
-            finnhub_latest = finnhub_to
-    else:
-        finnhub_latest = finnhub_to
 
     if polygon_items:
         # Get max published_at from items (already extracted in RawNewsItem)
@@ -187,16 +206,6 @@ async def main():
 
     await fetch_state.update_fetch_state(
         symbol="GENERAL",
-        fetch_source="finnhub",
-        from_time=finnhub_from,
-        to_time=finnhub_latest,
-        articles_fetched=len(finnhub_items),
-        articles_stored=len([i for i in all_items if i.fetch_source == "finnhub"]),
-        status="success"
-    )
-
-    await fetch_state.update_fetch_state(
-        symbol="GENERAL",
         fetch_source="polygon",
         from_time=polygon_from,
         to_time=polygon_latest,
@@ -205,9 +214,11 @@ async def main():
         status="success"
     )
 
-    print(f"✅ Updated fetch state for both sources")
-    print(f"   Finnhub latest: {finnhub_latest.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"   Polygon latest: {polygon_latest.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"✅ Updated fetch state for all sources")
+    print(f"   Finnhub max_id: {finnhub_max_id}")
+    # Display Polygon time in EST
+    polygon_latest_est = polygon_latest.replace(tzinfo=UTC).astimezone(EST)
+    print(f"   Polygon latest: {polygon_latest_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     print()
 
     # ========================================
@@ -223,7 +234,9 @@ async def main():
         total_failed = 0
 
         while True:
-            batch_stats = await llm_processor.process_unprocessed_batch(limit=20)
+            batch_stats = await llm_processor.process_unprocessed_batch(
+                limit=LLM_CONFIG['processing_limit']
+            )
 
             if batch_stats['fetched'] == 0:
                 print("✅ No more unprocessed items")
@@ -313,9 +326,11 @@ async def main():
     print("=" * 70)
     print("✅ INCREMENTAL FETCH COMPLETE")
     print("=" * 70)
-    print(f"💡 Next run will fetch news after:")
-    print(f"   Finnhub: {finnhub_latest.strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"   Polygon: {polygon_latest.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"💡 Next run will fetch:")
+    print(f"   Finnhub: news with ID > {finnhub_max_id}")
+    # Display in EST
+    polygon_latest_est = polygon_latest.replace(tzinfo=UTC).astimezone(EST)
+    print(f"   Polygon: news after {polygon_latest_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     print()
 
 
