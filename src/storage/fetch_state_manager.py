@@ -3,6 +3,9 @@ from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta, timezone
 from supabase import Client
 import asyncio
+import logging
+logger = logging.getLogger(__name__)
+
 
 # EST timezone (UTC-5) - for display only
 EST = timezone(timedelta(hours=-5))
@@ -56,8 +59,7 @@ class FetchStateManager:
                 return datetime.fromisoformat(result.data[0]["published_at"])
 
         except Exception as e:
-            print(f"⚠️  Error getting latest news timestamp: {e}")
-
+            logger.debug(f"⚠️  Error getting latest news timestamp: {e}")
         return None
 
     async def get_last_fetch_time(
@@ -93,7 +95,7 @@ class FetchStateManager:
 
             # Display in EST for user
             latest_est = latest_news_time.replace(tzinfo=UTC).astimezone(EST)
-            print(f"📍 {symbol} ({fetch_source}): Incremental from latest news {latest_est.strftime('%Y-%m-%d %H:%M')} EST")
+            logger.debug(f"📍 {symbol} ({fetch_source}): Incremental from latest news {latest_est.strftime('%Y-%m-%d %H:%M')} EST")
             return from_time, to_time
 
         # Fallback: check fetch_state table
@@ -121,7 +123,7 @@ class FetchStateManager:
 
                 # Display in EST for user
                 from_est = from_time.replace(tzinfo=UTC).astimezone(EST)
-                print(f"📍 {symbol} ({fetch_source}): Incremental fetch from {from_est.strftime('%Y-%m-%d %H:%M')} EST")
+                logger.debug(f"📍 {symbol} ({fetch_source}): Incremental fetch from {from_est.strftime('%Y-%m-%d %H:%M')} EST")
                 return from_time, to_time
 
         except Exception as e:
@@ -132,7 +134,7 @@ class FetchStateManager:
         to_time = datetime.now(UTC).replace(tzinfo=None)  # Current time in UTC
         from_time = to_time - timedelta(days=1)
 
-        print(f"🆕 {symbol} ({fetch_source}): First fetch, getting last 24 hours")
+        logger.debug(f"🆕 {symbol} ({fetch_source}): First fetch, getting last 24 hours")
         return from_time, to_time
 
     async def get_finnhub_max_id(
@@ -228,11 +230,11 @@ class FetchStateManager:
 
             await asyncio.to_thread(_upsert)
 
-            print(f"✅ Updated fetch state: {symbol} ({fetch_source}) - {articles_stored} stored")
+            logger.debug(f"✅ Updated fetch state: {symbol} ({fetch_source}) - {articles_stored} stored")
             return True
 
         except Exception as e:
-            print(f"❌ Error updating fetch state: {e}")
+            logger.debug(f"❌ Error updating fetch state: {e}")
             return False
 
     async def get_stale_fetches(
@@ -264,7 +266,7 @@ class FetchStateManager:
             return result.data or []
 
         except Exception as e:
-            print(f"❌ Error getting stale fetches: {e}")
+            logger.debug(f"❌ Error getting stale fetches: {e}")
             return []
 
     async def get_all_states(self) -> list[Dict[str, Any]]:
@@ -288,7 +290,7 @@ class FetchStateManager:
             return result.data or []
 
         except Exception as e:
-            print(f"❌ Error getting fetch states: {e}")
+            logger.debug(f"❌ Error getting fetch states: {e}")
             return []
 
     async def reset_fetch_state(
@@ -324,9 +326,9 @@ class FetchStateManager:
             result = await asyncio.to_thread(_delete)
             deleted = len(result.data) if result.data else 0
 
-            print(f"🔄 Reset {deleted} fetch state(s)")
+            logger.debug(f"🔄 Reset {deleted} fetch state(s)")
             return deleted
 
         except Exception as e:
-            print(f"❌ Error resetting fetch state: {e}")
+            logger.debug(f"❌ Error resetting fetch state: {e}")
             return 0

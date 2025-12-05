@@ -5,6 +5,9 @@ import json
 import asyncio
 
 from src.config import LLM_MODELS
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 class DailySummarizer:
@@ -147,15 +150,15 @@ Generate the daily highlights below:
                 result = response.json()
                 summary = result['choices'][0]['message']['content'].strip()
 
-                print(f"✅ Generated daily summary ({len(news_items)} articles)")
+                logger.debug(f"✅ Generated daily summary ({len(news_items)} articles)")
                 return summary
             else:
-                print(f"❌ LLM API error: {response.status_code}")
-                print(f"   Response: {response.text}")
+                logger.debug(f"❌ LLM API error: {response.status_code}")
+                logger.debug(f"   Response: {response.text}")
                 return None
 
         except Exception as e:
-            print(f"❌ Error generating daily summary: {e}")
+            logger.debug(f"❌ Error generating daily summary: {e}")
             return None
 
     async def close(self):

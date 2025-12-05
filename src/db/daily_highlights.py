@@ -3,6 +3,9 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime, date, time, timezone, timedelta
 from supabase import Client
 import asyncio
+import logging
+logger = logging.getLogger(__name__)
+
 
 # UTC timezone
 UTC = timezone.utc
@@ -68,11 +71,11 @@ class DailyHighlightDB:
 
             await asyncio.to_thread(_upsert)
 
-            print(f"✅ Saved daily highlight: {summary_date} {summary_time}")
+            logger.debug(f"✅ Saved daily highlight: {summary_date} {summary_time}")
             return True
 
         except Exception as e:
-            print(f"❌ Error saving daily highlight: {e}")
+            logger.debug(f"❌ Error saving daily highlight: {e}")
             return False
 
     async def get_highlight(
@@ -112,7 +115,7 @@ class DailyHighlightDB:
             return None
 
         except Exception as e:
-            print(f"❌ Error getting daily highlight: {e}")
+            logger.debug(f"❌ Error getting daily highlight: {e}")
             return None
 
     async def get_recent_highlights(
@@ -144,7 +147,7 @@ class DailyHighlightDB:
             return result.data or []
 
         except Exception as e:
-            print(f"❌ Error getting recent highlights: {e}")
+            logger.debug(f"❌ Error getting recent highlights: {e}")
             return []
 
     async def get_highlights_by_date_range(
@@ -179,7 +182,7 @@ class DailyHighlightDB:
             return result.data or []
 
         except Exception as e:
-            print(f"❌ Error getting highlights by date range: {e}")
+            logger.debug(f"❌ Error getting highlights by date range: {e}")
             return []
 
     async def delete_highlight(
@@ -210,9 +213,9 @@ class DailyHighlightDB:
 
             await asyncio.to_thread(_delete)
 
-            print(f"✅ Deleted daily highlight: {summary_date} {summary_time}")
+            logger.debug(f"✅ Deleted daily highlight: {summary_date} {summary_time}")
             return True
 
         except Exception as e:
-            print(f"❌ Error deleting daily highlight: {e}")
+            logger.debug(f"❌ Error deleting daily highlight: {e}")
             return False

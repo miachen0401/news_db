@@ -2,6 +2,9 @@
 import asyncio
 from typing import Dict, Any
 from supabase import Client
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 class DataCorrector:
@@ -28,8 +31,7 @@ class DataCorrector:
         Returns:
             Dict with correction statistics
         """
-        print("🔧 Correcting 'empty string' values in stock_news table...")
-
+        logger.debug("🔧 Correcting 'empty string' values in stock_news table...")
         stats = {
             "symbol_corrected": 0,
             "secondary_category_corrected": 0,
@@ -54,11 +56,10 @@ class DataCorrector:
             stats["total_checked"] = len(problematic_records)
 
             if not problematic_records:
-                print("✅ No 'empty string' values found")
+                logger.debug("✅ No 'empty string' values found")
                 return stats
 
-            print(f"📊 Found {len(problematic_records)} records with 'empty string' values")
-
+            logger.debug(f"📊 Found {len(problematic_records)} records with 'empty string' values")
             # STEP 2: Correct each record
             for record in problematic_records:
                 record_id = record.get("id")
@@ -71,7 +72,7 @@ class DataCorrector:
 
                 # Check if symbol is "empty string" or None (fix null constraint violation)
                 if symbol == "empty string":
-                    update_data["secondary_category"] = "" 
+                    update_data["symbol"] = "" 
                     stats["symbol_corrected"] += 1
 
                 # Check if secondary_category is "empty string"
@@ -94,17 +95,16 @@ class DataCorrector:
                         await asyncio.to_thread(_update)
 
                     except Exception as e:
-                        print(f"⚠️  Error updating record {record_id}: {e}")
+                        logger.debug(f"⚠️  Error updating record {record_id}: {e}")
                         stats["errors"] += 1
 
-            print(f"✅ Correction complete:")
-            print(f"   Symbol corrected: {stats['symbol_corrected']}")
-            print(f"   Secondary category corrected: {stats['secondary_category_corrected']}")
+            logger.debug(f"✅ Correction complete:")
+            logger.debug(f"   Symbol corrected: {stats['symbol_corrected']}")
+            logger.debug(f"   Secondary category corrected: {stats['secondary_category_corrected']}")
             if stats["errors"] > 0:
-                print(f"   Errors: {stats['errors']}")
-
+                logger.debug(f"   Errors: {stats['errors']}")
         except Exception as e:
-            print(f"❌ Error during correction: {e}")
+            logger.debug(f"❌ Error during correction: {e}")
             stats["errors"] += 1
 
         return stats
@@ -116,19 +116,17 @@ class DataCorrector:
         Returns:
             Dict with all correction statistics
         """
-        print("=" * 70)
-        print("🔧 RUNNING DATABASE CORRECTIONS")
-        print("=" * 70)
-        print()
-
+        logger.debug("=" * 70)
+        logger.debug("🔧 RUNNING DATABASE CORRECTIONS")
+        logger.debug("=" * 70)
+        logger.debug("")
         all_stats = {}
 
         # Run empty string corrections
         all_stats["empty_strings"] = await self.correct_empty_strings_in_stock_news()
 
-        print()
-        print("=" * 70)
-        print("✅ ALL CORRECTIONS COMPLETE")
-        print("=" * 70)
-
+        logger.debug("")
+        logger.debug("=" * 70)
+        logger.debug("✅ ALL CORRECTIONS COMPLETE")
+        logger.debug("=" * 70)
         return all_stats

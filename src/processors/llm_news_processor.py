@@ -7,6 +7,9 @@ from src.storage.raw_news_storage import RawNewsStorage
 from src.db.stock_news import StockNewsDB
 from src.services.llm_categorizer import NewsCategorizer
 from src.config import LLM_CONFIG
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 class LLMNewsProcessor:
@@ -65,7 +68,7 @@ class LLMNewsProcessor:
             }
 
         except Exception as e:
-            print(f"❌ Error extracting content: {e}")
+            logger.debug(f"❌ Error extracting content: {e}")
             return None
 
     def _build_processed_data(
@@ -138,7 +141,7 @@ class LLMNewsProcessor:
             return processed_data
 
         except Exception as e:
-            print(f"❌ Error building processed data: {e}")
+            logger.debug(f"❌ Error building processed data: {e}")
             return None
 
     async def process_raw_item(
@@ -185,7 +188,7 @@ class LLMNewsProcessor:
                     item_id,
                     ProcessingStatus.COMPLETED
                 )
-                print(f"⏭️  Skipped NON_FINANCIAL: {processed_data['title'][:50]}...")
+                logger.debug(f"⏭️  Skipped NON_FINANCIAL: {processed_data['title'][:50]}...")
                 return True  # Mark as successful but don't store
 
             # Handle ERROR category - store with error_log
@@ -193,8 +196,7 @@ class LLMNewsProcessor:
                 error_log = categorization.get("api_error", "Unknown error")
                 # Store ERROR items so they can be manually reviewed
                 processed_data["metadata"]["error_log"] = error_log
-                print(f"⚠️  ERROR category: {processed_data['title'][:50]}... - {error_log[:50]}")
-
+                logger.debug(f"⚠️  ERROR category: {processed_data['title'][:50]}... - {error_log[:50]}")
             # Store in stock_news table (no LIFO stack, just insert)
             result = await self.stock_news_db.insert_news(processed_data)
 
@@ -205,7 +207,7 @@ class LLMNewsProcessor:
                 )
                 cat = processed_data.get('category', '')
                 sec_cat = processed_data.get('secondary_category', '')
-                print(f"✅ Stored [{cat}] {processed_data['title'][:45]}... ({sec_cat or 'general'})")
+                logger.debug(f"✅ Stored [{cat}] {processed_data['title'][:45]}... ({sec_cat or 'general'})")
                 return True
             else:
                 await self.raw_storage.update_processing_status(
@@ -222,7 +224,7 @@ class LLMNewsProcessor:
                 ProcessingStatus.FAILED,
                 error_log=error_msg
             )
-            print(f"❌ {error_msg}")
+            logger.debug(f"❌ {error_msg}")
             return False
 
     async def process_unprocessed_batch(self, limit: int = 50) -> Dict[str, int]:
@@ -250,8 +252,7 @@ class LLMNewsProcessor:
         if not unprocessed:
             return stats
 
-        print(f"📊 Processing {stats['fetched']} unprocessed news items...")
-
+        logger.debug(f"📊 Processing {stats['fetched']} unprocessed news items...")
         # Extract titles and summaries for LLM
         news_for_llm = []
         for item in unprocessed:
@@ -264,8 +265,7 @@ class LLMNewsProcessor:
 
         # Categorize with LLM in batch
         if news_for_llm:
-            print(f"🤖 Sending {len(news_for_llm)} items to LLM for categorization...")
-
+            logger.debug(f"🤖 Sending {len(news_for_llm)} items to LLM for categorization...")
             categorized = await self.categorizer.categorize_batch(
                 news_for_llm,
                 batch_size=LLM_CONFIG['batch_size']
@@ -288,12 +288,11 @@ class LLMNewsProcessor:
                 else:
                     stats["failed"] += 1
 
-        print(f"✅ Processing complete:")
-        print(f"   Categorized: {stats['categorized']}")
-        print(f"   Stored: {stats['processed']}")
-        print(f"   NON_FINANCIAL skipped: {stats['non_financial_skipped']}")
-        print(f"   Failed: {stats['failed']}")
-
+        logger.debug(f"✅ Processing complete:")
+        logger.debug(f"   Categorized: {stats['categorized']}")
+        logger.debug(f"   Stored: {stats['processed']}")
+        logger.debug(f"   NON_FINANCIAL skipped: {stats['non_financial_skipped']}")
+        logger.debug(f"   Failed: {stats['failed']}")
         return stats
 
     async def recategorize_uncategorized_batch(self, limit: int = 50) -> Dict[str, int]:
@@ -321,8 +320,7 @@ class LLMNewsProcessor:
         if not uncategorized:
             return stats
 
-        print(f"🔄 Re-processing {stats['fetched']} UNCATEGORIZED news items...")
-
+        logger.debug(f"🔄 Re-processing {stats['fetched']} UNCATEGORIZED news items...")
         # Extract titles and summaries for LLM
         news_for_llm = []
         for item in uncategorized:
@@ -337,8 +335,7 @@ class LLMNewsProcessor:
 
         # Categorize with LLM in batch
         if news_for_llm:
-            print(f"🤖 Sending {len(news_for_llm)} items to LLM for re-categorization...")
-
+            logger.debug(f"🤖 Sending {len(news_for_llm)} items to LLM for re-categorization...")
             categorized = await self.categorizer.categorize_batch(
                 news_for_llm,
                 batch_size=LLM_CONFIG['batch_size']
@@ -367,20 +364,19 @@ class LLMNewsProcessor:
                     )
                     if success:
                         stats["failed"] += 1
-                        print(f"❌ ERROR (will not retry): {stock_item.get('title', '')[:40]}... - {error_log[:50]}")
+                        logger.debug(f"❌ ERROR (will not retry): {stock_item.get('title', '')[:40]}... - {error_log[:50]}")
                     continue
 
                 # If still UNCATEGORIZED after retry, skip (will retry next time)
                 if new_category == "UNCATEGORIZED":
                     stats["failed"] += 1
-                    print(f"⚠️  Still UNCATEGORIZED: {stock_item.get('title', '')[:50]}...")
+                    logger.debug(f"⚠️  Still UNCATEGORIZED: {stock_item.get('title', '')[:50]}...")
                     continue
 
                 # If NON_FINANCIAL, update category
                 if new_category == "NON_FINANCIAL":
                     stats["non_financial_removed"] += 1
-                    print(f"🗑️  Marked as NON_FINANCIAL: {stock_item.get('title', '')[:50]}...")
-
+                    logger.debug(f"🗑️  Marked as NON_FINANCIAL: {stock_item.get('title', '')[:50]}...")
                 # Update category (clear error_log if previously had error)
                 success = await self.stock_news_db.update_category(
                     item_id=item_id,
@@ -391,14 +387,13 @@ class LLMNewsProcessor:
 
                 if success:
                     stats["updated"] += 1
-                    print(f"✅ Updated [{new_category}] {stock_item.get('title', '')[:45]}... ({new_secondary or 'general'})")
+                    logger.debug(f"✅ Updated [{new_category}] {stock_item.get('title', '')[:45]}... ({new_secondary or 'general'})")
                 else:
                     stats["failed"] += 1
 
-        print(f"✅ Re-categorization complete:")
-        print(f"   Re-categorized: {stats['recategorized']}")
-        print(f"   Updated: {stats['updated']}")
-        print(f"   NON_FINANCIAL marked: {stats['non_financial_removed']}")
-        print(f"   Failed: {stats['failed']}")
-
+        logger.debug(f"✅ Re-categorization complete:")
+        logger.debug(f"   Re-categorized: {stats['recategorized']}")
+        logger.debug(f"   Updated: {stats['updated']}")
+        logger.debug(f"   NON_FINANCIAL marked: {stats['non_financial_removed']}")
+        logger.debug(f"   Failed: {stats['failed']}")
         return stats

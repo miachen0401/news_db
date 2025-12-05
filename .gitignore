@@ -80,3 +80,6 @@ dmypy.json
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Files or folders
+backups/

@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 import httpx
 
 from src.models.raw_news import RawNewsItem
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 class GeneralNewsFetcher:
@@ -48,8 +51,7 @@ class GeneralNewsFetcher:
 
         for category in categories:
             try:
-                print(f"🔍 Fetching Finnhub '{category}' news (minId={min_id})...")
-
+                logger.debug(f"🔍 Fetching Finnhub '{category}' news (minId={min_id})...")
                 response = await self.finnhub_client.get(
                     "https://finnhub.io/api/v1/news",
                     params={
@@ -79,20 +81,17 @@ class GeneralNewsFetcher:
 
                             raw_items.append(raw_item)
                         except Exception as e:
-                            print(f"⚠️  Error converting article: {e}")
+                            logger.debug(f"⚠️  Error converting article: {e}")
                             continue
 
-                    print(f"✅ Fetched {len(raw_items)} news from Finnhub '{category}'")
+                    logger.debug(f"✅ Fetched {len(raw_items)} news from Finnhub '{category}'")
                     all_raw_items.extend(raw_items)
 
                 else:
-                    print(f"⚠️  Finnhub '{category}' API error: {response.status_code}")
-
+                    logger.debug(f"⚠️  Finnhub '{category}' API error: {response.status_code}")
             except Exception as e:
-                print(f"❌ Error fetching Finnhub '{category}' news: {e}")
-
-        print(f"📊 Total Finnhub news: {len(all_raw_items)} (max_id: {max_id_seen})")
-
+                logger.debug(f"❌ Error fetching Finnhub '{category}' news: {e}")
+        logger.debug(f"📊 Total Finnhub news: {len(all_raw_items)} (max_id: {max_id_seen})")
         return all_raw_items, max_id_seen
 
     async def fetch_polygon_general_news(
@@ -113,8 +112,7 @@ class GeneralNewsFetcher:
             List of RawNewsItem objects
         """
         try:
-            print(f"🔍 Fetching Polygon general news ({from_date} to {to_date})...")
-
+            logger.debug(f"🔍 Fetching Polygon general news ({from_date} to {to_date})...")
             response = await self.polygon_client.get(
                 "https://api.polygon.io/v2/reference/news",
                 params={
@@ -143,18 +141,18 @@ class GeneralNewsFetcher:
                         )
                         raw_items.append(raw_item)
                     except Exception as e:
-                        print(f"⚠️  Error converting article: {e}")
+                        logger.debug(f"⚠️  Error converting article: {e}")
                         continue
 
-                print(f"✅ Fetched {len(raw_items)} general news from Polygon")
+                logger.debug(f"✅ Fetched {len(raw_items)} general news from Polygon")
                 return raw_items
 
             else:
-                print(f"⚠️  Polygon API error: {response.status_code}")
+                logger.debug(f"⚠️  Polygon API error: {response.status_code}")
                 return []
 
         except Exception as e:
-            print(f"❌ Error fetching Polygon general news: {e}")
+            logger.debug(f"❌ Error fetching Polygon general news: {e}")
             return []
 
     async def fetch_all_general_news(
@@ -172,20 +170,18 @@ class GeneralNewsFetcher:
         Returns:
             Combined list of RawNewsItem objects
         """
-        print(f"📰 Fetching general news from {from_date} to {to_date}")
-        print()
-
+        logger.debug(f"📰 Fetching general news from {from_date} to {to_date}")
+        logger.debug("")
         # Fetch from both sources
         finnhub_items = await self.fetch_finnhub_general_news()
         polygon_items = await self.fetch_polygon_general_news(from_date, to_date, limit=100)
 
         all_items = finnhub_items + polygon_items
 
-        print()
-        print(f"📊 Total general news fetched: {len(all_items)}")
-        print(f"   - Finnhub: {len(finnhub_items)}")
-        print(f"   - Polygon: {len(polygon_items)}")
-
+        logger.debug("")
+        logger.debug(f"📊 Total general news fetched: {len(all_items)}")
+        logger.debug(f"   - Finnhub: {len(finnhub_items)}")
+        logger.debug(f"   - Polygon: {len(polygon_items)}")
         return all_items
 
     async def fetch_company_news(
@@ -210,8 +206,7 @@ class GeneralNewsFetcher:
             from_date = from_timestamp.strftime("%Y-%m-%d")
             to_date = to_timestamp.strftime("%Y-%m-%d")
 
-            print(f"🔍 Fetching Finnhub company news for {symbol} ({from_date} to {to_date})...")
-
+            logger.debug(f"🔍 Fetching Finnhub company news for {symbol} ({from_date} to {to_date})...")
             response = await self.finnhub_client.get(
                 "https://finnhub.io/api/v1/company-news",
                 params={
@@ -241,18 +236,18 @@ class GeneralNewsFetcher:
                             raw_items.append(raw_item)
 
                     except Exception as e:
-                        print(f"⚠️  Error converting article: {e}")
+                        logger.debug(f"⚠️  Error converting article: {e}")
                         continue
 
-                print(f"✅ Fetched {len(raw_items)} news for {symbol}")
+                logger.debug(f"✅ Fetched {len(raw_items)} news for {symbol}")
                 return raw_items
 
             else:
-                print(f"⚠️  Finnhub company-news API error for {symbol}: {response.status_code}")
+                logger.debug(f"⚠️  Finnhub company-news API error for {symbol}: {response.status_code}")
                 return []
 
         except Exception as e:
-            print(f"❌ Error fetching company news for {symbol}: {e}")
+            logger.debug(f"❌ Error fetching company news for {symbol}: {e}")
             return []
 
     async def close(self):

@@ -1,3 +1,6 @@
+import logging
+logger = logging.getLogger(__name__)
+
 """Configuration for LLM-based news categorization system."""
 
 # LLM Model Configuration

@@ -3,6 +3,9 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from supabase import Client
 import asyncio
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 class StockNewsDB:
@@ -48,7 +51,7 @@ class StockNewsDB:
 
                 dup_result = await asyncio.to_thread(_check_dup)
                 if dup_result.data:
-                    print(f"⚠️  Duplicate URL detected, skipping: {url[:50]}...")
+                    logger.debug(f"⚠️  Duplicate URL detected, skipping: {url[:50]}...")
                     return None
 
             # Prepare news item (no position_in_stack)
@@ -81,7 +84,7 @@ class StockNewsDB:
             return None
 
         except Exception as e:
-            print(f"❌ Error inserting news: {e}")
+            logger.debug(f"❌ Error inserting news: {e}")
             return None
 
     async def count_uncategorized(self) -> int:
@@ -105,7 +108,7 @@ class StockNewsDB:
             return result.count or 0
 
         except Exception as e:
-            print(f"❌ Error counting uncategorized news: {e}")
+            logger.debug(f"❌ Error counting uncategorized news: {e}")
             return 0
 
     async def get_uncategorized(self, limit: int = 100) -> List[Dict[str, Any]]:
@@ -136,7 +139,7 @@ class StockNewsDB:
             return result.data or []
 
         except Exception as e:
-            print(f"❌ Error getting uncategorized news: {e}")
+            logger.debug(f"❌ Error getting uncategorized news: {e}")
             return []
 
     async def update_category(
@@ -182,7 +185,7 @@ class StockNewsDB:
             return result.data is not None
 
         except Exception as e:
-            print(f"❌ Error updating category: {e}")
+            logger.debug(f"❌ Error updating category: {e}")
             return False
 
     async def get_stats(self, symbol: Optional[str] = None) -> Dict[str, Any]:
@@ -214,5 +217,5 @@ class StockNewsDB:
             return stats
 
         except Exception as e:
-            print(f"❌ Error getting stats: {e}")
+            logger.debug(f"❌ Error getting stats: {e}")
             return {"total": 0}

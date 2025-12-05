@@ -5,6 +5,9 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 import hashlib
 import json
+import logging
+logger = logging.getLogger(__name__)
+
 
 # EST timezone (UTC-5) - for display only
 EST = timezone(timedelta(hours=-5))

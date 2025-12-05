@@ -9,6 +9,12 @@ from supabase import create_client
 from src.services.daily_summarizer import DailySummarizer
 from src.db.daily_highlights import DailyHighlightDB
 from src.config import INCLUDED_CATEGORIES
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
 
 # EST timezone (UTC-5) - for user input/display only
 EST = timezone(timedelta(hours=-5))
@@ -20,19 +26,18 @@ LOG_DIR = Path(__file__).parent / ".log"
 # ============================================
 # CONFIGURATION: Change these as needed
 # ============================================
-SUMMARY_DATE = "2025-11-27"  # None = today, or specify date like "2025-11-23"
+SUMMARY_DATE = "2025-12-02"  # None = today, or specify date like "2025-11-23"
 SUMMARY_TIME = "18:00:00"  # None = now, or specify time like "17:00:00"
 
 
 async def main():
     """Generate daily summary for stock news."""
-    print("=" * 70)
-    print("📊 DAILY NEWS SUMMARY GENERATOR")
-    print("=" * 70)
+    logger.debug("=" * 70)
+    logger.info("📊 DAILY NEWS SUMMARY GENERATOR")
+    logger.debug("=" * 70)
     now_est = datetime.now(UTC).astimezone(EST)
-    print(f"Run time: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
-    print()
-
+    logger.debug(f"Run time: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
+    logger.debug("")
     # Load environment
     env_path = Path(__file__).parent / ".env"
     load_dotenv(env_path)
@@ -43,12 +48,11 @@ async def main():
 
     # Validate
     if not all([zhipu_api_key, supabase_url, supabase_key]):
-        print("❌ Missing required environment variables")
+        logger.debug("❌ Missing required environment variables")
         return
 
-    print("✅ Configuration loaded")
-    print()
-
+    logger.debug("✅ Configuration loaded")
+    logger.debug("")
     # Initialize clients
     supabase = create_client(supabase_url, supabase_key)
     summarizer = DailySummarizer(api_key=zhipu_api_key)
@@ -77,17 +81,15 @@ async def main():
     to_time_est = datetime.combine(summary_date_est, summary_time_est)
     to_time = to_time_est.replace(tzinfo=EST).astimezone(UTC).replace(tzinfo=None)
 
-    print(f"📅 Summary for: {summary_date_est} {summary_time_est} EST")
-    print(f"📰 News window: {from_time_est.strftime('%m/%d %H:%M')} - {to_time_est.strftime('%m/%d %H:%M')} EST")
-    print()
-
+    logger.debug(f"📅 Summary for: {summary_date_est} {summary_time_est} EST")
+    logger.debug(f"📰 News window: {from_time_est.strftime('%m/%d %H:%M')} - {to_time_est.strftime('%m/%d %H:%M')} EST")
+    logger.debug("")
     # ========================================
     # STEP 1: Fetch news from database (using UTC)
     # ========================================
-    print("-" * 70)
-    print("STEP 1: Fetch News from Database")
-    print("-" * 70)
-
+    logger.debug("-" * 70)
+    logger.info("STEP 1: Fetch News from Database")
+    logger.debug("-" * 70)
     try:
         def _fetch_news():
             return (
@@ -104,8 +106,7 @@ async def main():
         result = await asyncio.to_thread(_fetch_news)
         news_items = result.data or []
 
-        print(f"📰 Fetched {len(news_items)} news articles (only including {len(INCLUDED_CATEGORIES)} valid categories)")
-
+        logger.debug(f"📰 Fetched {len(news_items)} news articles (only including {len(INCLUDED_CATEGORIES)} valid categories)")
         # Count by category
         category_counts = {}
         for item in news_items:
@@ -113,46 +114,41 @@ async def main():
             category_counts[cat] = category_counts.get(cat, 0) + 1
 
         if category_counts:
-            print(f"\n📊 News by Category:")
+            logger.debug(f"\n📊 News by Category:")
             for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
-                print(f"   {cat}: {count}")
-
-        print()
-
+                logger.debug(f"   {cat}: {count}")
+        logger.debug("")
     except Exception as e:
-        print(f"❌ Error fetching news: {e}")
+        logger.debug(f"❌ Error fetching news: {e}")
         return
 
     # ========================================
     # STEP 2: Generate summary with LLM
     # ========================================
-    print("-" * 70)
-    print("STEP 2: Generate Daily Summary")
-    print("-" * 70)
-
+    logger.debug("-" * 70)
+    logger.info("STEP 2: Generate Daily Summary")
+    logger.debug("-" * 70)
     if len(news_items) == 0:
-        print("⚠️  No news found in time window")
+        logger.debug("⚠️  No news found in time window")
         highlight_text = f"No significant news from {from_time_est.strftime('%m/%d %H:%M')} to {to_time_est.strftime('%m/%d %H:%M')} EST."
     else:
-        print(f"🤖 Generating summary using GLM-4-flash...")
+        logger.debug(f"🤖 Generating summary using GLM-4-flash...")
         highlight_text = await summarizer.generate_daily_summary(
             news_items=news_items,
             temperature=0.3
         )
 
         if not highlight_text:
-            print("❌ Failed to generate summary")
+            logger.debug("❌ Failed to generate summary")
             return
 
-    print()
-
+    logger.debug("")
     # ========================================
     # STEP 3: Save to log file (local cache)
     # ========================================
-    print("-" * 70)
-    print("STEP 3: Save to Log File (Local Cache)")
-    print("-" * 70)
-
+    logger.debug("-" * 70)
+    logger.info("STEP 3: Save to Log File (Local Cache)")
+    logger.debug("-" * 70)
     # Create .log directory if not exists
     LOG_DIR.mkdir(exist_ok=True)
 
@@ -188,32 +184,27 @@ async def main():
         with open(log_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(log_content))
 
-        print(f"✅ Saved to log file: {log_path}")
-        print(f"   File size: {log_path.stat().st_size} bytes")
-
+        logger.debug(f"✅ Saved to log file: {log_path}")
+        logger.debug(f"   File size: {log_path.stat().st_size} bytes")
     except Exception as e:
-        print(f"❌ Error saving log file: {e}")
-
-    print()
-
+        logger.debug(f"❌ Error saving log file: {e}")
+    logger.debug("")
     # Display summary in terminal (shortened)
-    print("=" * 70)
-    print("Generated Summary (Preview):")
-    print("=" * 70)
+    logger.debug("=" * 70)
+    logger.debug("Generated Summary (Preview):")
+    logger.debug("=" * 70)
     # Show first 500 characters as preview
     preview = highlight_text[:500] + "..." if len(highlight_text) > 500 else highlight_text
-    print(preview)
-    print("=" * 70)
-    print(f"📄 Full summary saved to: {log_path}")
-    print()
-
+    logger.debug(preview)
+    logger.debug("=" * 70)
+    logger.debug(f"📄 Full summary saved to: {log_path}")
+    logger.debug("")
     # ========================================
     # STEP 4: Save to Database
     # ========================================
-    print("-" * 70)
-    print("STEP 4: Save to Database")
-    print("-" * 70)
-
+    logger.debug("-" * 70)
+    logger.info("STEP 4: Save to Database")
+    logger.debug("-" * 70)
     categories_included = list(category_counts.keys()) if news_items else []
 
     success = await highlights_db.save_highlight(
@@ -227,25 +218,21 @@ async def main():
     )
 
     if success:
-        print(f"✅ Saved to database")
+        logger.debug(f"✅ Saved to database")
     else:
-        print(f"❌ Failed to save to database")
-
-    print()
-
+        logger.debug(f"❌ Failed to save to database")
+    logger.debug("")
     # Cleanup
     await summarizer.close()
 
-    print("=" * 70)
-    print("✅ DAILY SUMMARY COMPLETE")
-    print("=" * 70)
-    print(f"📅 Date: {summary_date_est} (EST)")
-    print(f"🕐 Time: {summary_time_est} (EST)")
-    print(f"📰 News Count: {len(news_items)}")
-    print(f"📝 Summary Length: {len(highlight_text)} characters")
-    print(f"📄 Log File: {log_path}")
-    print()
-
-
+    logger.debug("=" * 70)
+    logger.debug("✅ DAILY SUMMARY COMPLETE")
+    logger.debug("=" * 70)
+    logger.debug(f"📅 Date: {summary_date_est} (EST)")
+    logger.debug(f"🕐 Time: {summary_time_est} (EST)")
+    logger.debug(f"📰 News Count: {len(news_items)}")
+    logger.debug(f"📝 Summary Length: {len(highlight_text)} characters")
+    logger.debug(f"📄 Log File: {log_path}")
+    logger.debug("")
 if __name__ == "__main__":
     asyncio.run(main())
