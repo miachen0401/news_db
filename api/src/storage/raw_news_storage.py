@@ -36,7 +36,7 @@ class RawNewsStorage:
         try:
             # Check for duplicates first
             if await self.check_duplicate(item.content_hash or item.generate_content_hash()):
-                logger.debug(f"⚠️  Duplicate content hash detected, skipping: {item.url}")
+                logger.debug(f"Duplicate content hash detected, skipping: {item.url}")
                 return None
 
             # Convert to database dict
@@ -49,13 +49,13 @@ class RawNewsStorage:
             result = await asyncio.to_thread(_insert)
 
             if result.data:
-                logger.debug(f"✅ Inserted raw news for {item.symbol}: {item.url[:50]}...")
+                logger.debug(f"Inserted raw news for {item.symbol}: {item.url[:50]}...")
                 return result.data[0]
 
             return None
 
         except Exception as e:
-            logger.debug(f"❌ Error inserting raw news: {e}")
+            logger.debug(f"Error inserting raw news: {e}")
             return None
 
     async def bulk_insert(self, items: List[RawNewsItem]) -> Dict[str, int]:
@@ -107,7 +107,7 @@ class RawNewsStorage:
             return len(result.data) > 0
 
         except Exception as e:
-            logger.debug(f"❌ Error checking duplicate: {e}")
+            logger.debug(f"Error checking duplicate: {e}")
             return False
 
     async def count_pending(self) -> int:
@@ -131,7 +131,7 @@ class RawNewsStorage:
             return result.count or 0
 
         except Exception as e:
-            logger.debug(f"❌ Error counting pending news: {e}")
+            logger.debug(f"Error counting pending news: {e}")
             return 0
 
     async def get_unprocessed(self, limit: int = 100) -> List[Dict[str, Any]]:
@@ -161,7 +161,7 @@ class RawNewsStorage:
             return result.data or []
 
         except Exception as e:
-            logger.debug(f"❌ Error getting unprocessed news: {e}")
+            logger.debug(f"Error getting unprocessed news: {e}")
             return []
 
     async def get_by_symbol(
@@ -199,7 +199,7 @@ class RawNewsStorage:
             return result.data or []
 
         except Exception as e:
-            logger.debug(f"❌ Error getting news for {symbol}: {e}")
+            logger.debug(f"Error getting news for {symbol}: {e}")
             return []
 
     async def update_processing_status(
@@ -245,7 +245,7 @@ class RawNewsStorage:
             return result.data is not None
 
         except Exception as e:
-            logger.debug(f"❌ Error updating processing status: {e}")
+            logger.debug(f"Error updating processing status: {e}")
             return False
 
     async def delete_old_processed(self, days: int = 30) -> int:
@@ -273,11 +273,11 @@ class RawNewsStorage:
 
             result = await asyncio.to_thread(_delete)
             deleted_count = len(result.data) if result.data else 0
-            logger.debug(f"🗑️  Deleted {deleted_count} old processed items (>{days} days)")
+            logger.debug(f"Deleted {deleted_count} old processed items (>{days} days)")
             return deleted_count
 
         except Exception as e:
-            logger.debug(f"❌ Error deleting old processed news: {e}")
+            logger.debug(f"Error deleting old processed news: {e}")
             return 0
 
     async def get_stats(self) -> Dict[str, Any]:
@@ -334,5 +334,5 @@ class RawNewsStorage:
             return stats
 
         except Exception as e:
-            logger.debug(f"❌ Error getting stats: {e}")
+            logger.debug(f"Error getting stats: {e}")
             return {"total": 0, "pending": 0, "completed": 0, "failed": 0, "processing": 0}

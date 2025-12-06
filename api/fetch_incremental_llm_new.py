@@ -1,7 +1,13 @@
 """Incremental news fetcher with LLM categorization."""
+# Add api directory to path so src module can be found (must be first)
+import sys
+from pathlib import Path
+_api_dir = str(Path(__file__).parent.resolve())
+if _api_dir not in sys.path:
+    sys.path.insert(0, _api_dir)
+
 import asyncio
 import os
-from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client
@@ -24,16 +30,18 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
+# Set httpx logging to WARNING to suppress HTTP request logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
 # change to INFO level for production
 
 
 async def main():
     """Run incremental news fetch with LLM categorization."""
-    logger.debug("=" * 70)
-    logger.debug("📰 INCREMENTAL NEWS FETCHER (LLM Categorization)")
-    logger.debug("=" * 70)
+    logger.info("=" * 70)
+    logger.info("INCREMENTAL NEWS FETCHER (LLM Categorization)")
+    logger.info("=" * 70)
     now_est = datetime.now(UTC).astimezone(EST)
-    print(f"Run time: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
+    logger.info(f"Run time: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     logger.debug("")
     # Load environment
     env_path = Path(__file__).parent / ".env"
@@ -47,10 +55,10 @@ async def main():
 
     # Validate
     if not all([finnhub_api_key, polygon_api_key, zhipu_api_key, supabase_url, supabase_key]):
-        logger.debug("❌ Missing required environment variables")
+        logger.info("Missing required environment variables")
         return
 
-    logger.debug("✅ Configuration loaded")
+    logger.info("Configuration loaded")
     logger.debug("")
     # Initialize clients
     supabase = create_client(supabase_url, supabase_key)
@@ -72,88 +80,10 @@ async def main():
     )
 
     # ========================================
-    # STEP 1: Check for pending raw news and process them first
-    # Priority: 1 (Highest - process_pending_raw)
+    # STEP 1: Get Polygon fetch window
     # ========================================
     logger.debug("-" * 70)
-    logger.info("STEP 1: Check for Pending Raw News (Priority 1)")
-    logger.debug("-" * 70)
-    pending_count = await raw_storage.count_pending()
-    logger.debug(f"📊 Pending raw news items: {pending_count}")
-    logger.debug("")
-    if pending_count > 0:
-        logger.debug(f"⚙️  Processing {pending_count} pending items before fetching new news...")
-        logger.debug("")
-        total_processed = 0
-        total_skipped = 0
-        total_failed = 0
-
-        while True:
-            batch_stats = await llm_processor.process_unprocessed_batch(
-                limit=LLM_CONFIG['processing_limit']
-            )
-
-            if batch_stats['fetched'] == 0:
-                logger.debug("✅ No more pending items")
-                break
-
-            total_processed += batch_stats['processed']
-            total_skipped += batch_stats['non_financial_skipped']
-            total_failed += batch_stats['failed']
-
-            if batch_stats['categorized'] == 0:
-                break
-
-        logger.debug("")
-        logger.debug(f"📊 Pending Processing Summary:")
-        logger.debug(f"   Categorized & stored: {total_processed}")
-        logger.debug(f"   NON_FINANCIAL skipped: {total_skipped}")
-        logger.debug(f"   Failed: {total_failed}")
-        logger.debug("")
-    # ========================================
-    # STEP 1.5: Re-process UNCATEGORIZED news in stock_news
-    # Priority: 2 (High - recategorize_uncategorized)
-    # ========================================
-    logger.debug("-" * 70)
-    logger.info("STEP 1.5: Re-process UNCATEGORIZED News (Priority 2)")
-    logger.debug("-" * 70)
-    uncategorized_count = await stock_news_db.count_uncategorized()
-    logger.debug(f"🔄 UNCATEGORIZED news items: {uncategorized_count}")
-    logger.debug("")
-    if uncategorized_count > 0:
-        logger.debug(f"🔄 Re-categorizing {uncategorized_count} UNCATEGORIZED items...")
-        logger.debug("")
-        total_updated = 0
-        total_non_financial = 0
-        total_failed_recat = 0
-
-        while True:
-            recat_stats = await llm_processor.recategorize_uncategorized_batch(
-                limit=LLM_CONFIG['processing_limit']
-            )
-
-            if recat_stats['fetched'] == 0:
-                logger.debug("✅ No more UNCATEGORIZED items")
-                break
-
-            total_updated += recat_stats['updated']
-            total_non_financial += recat_stats['non_financial_removed']
-            total_failed_recat += recat_stats['failed']
-
-            if recat_stats['recategorized'] == 0:
-                break
-
-        logger.debug("")
-        logger.debug(f"📊 Re-categorization Summary:")
-        logger.debug(f"   Updated: {total_updated}")
-        logger.debug(f"   NON_FINANCIAL marked: {total_non_financial}")
-        logger.debug(f"   Failed: {total_failed_recat}")
-        logger.debug("")
-    # ========================================
-    # STEP 2: Get Polygon fetch window
-    # ========================================
-    logger.debug("-" * 70)
-    logger.info("STEP 2: Get Polygon Fetch Window")
+    logger.info("STEP 1: Get Polygon Fetch Window")
     logger.debug("-" * 70)
     polygon_from, polygon_to = await fetch_state.get_last_fetch_time(
         symbol="GENERAL",
@@ -169,16 +99,15 @@ async def main():
 
     logger.debug("")
     # ========================================
-    # STEP 3: Fetch incremental news
-    # Priority: 3 (Normal - fetch_and_process)
+    # STEP 2: Fetch incremental news
     # ========================================
     logger.debug("-" * 70)
-    logger.info("STEP 3: Fetch Incremental News (Priority 3)")
+    logger.info("STEP 2: Fetch Incremental News")
     logger.debug("-" * 70)
     all_items = []
 
     # Fetch from Finnhub (multiple categories with minId for incremental fetching)
-    logger.debug(f"\n🔍 Fetching Finnhub general news...")
+    logger.info(f"Fetching Finnhub general news...")
     # Get the maximum min_id across all categories to use for fetching
     # This ensures we don't re-fetch news we already have
     max_min_ids = []
@@ -208,7 +137,7 @@ async def main():
     polygon_from_str = polygon_from.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
     polygon_to_str = polygon_to.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
 
-    logger.debug(f"\n🔍 Fetching Polygon news ({polygon_from_str} to {polygon_to_str})...")
+    logger.info(f"Fetching Polygon news ({polygon_from_str} to {polygon_to_str})...")
     polygon_items = await general_fetcher.fetch_polygon_general_news(
         from_date=polygon_from_str,
         to_date=polygon_to_str,
@@ -217,25 +146,24 @@ async def main():
     all_items.extend(polygon_items)
 
     logger.debug("")
-    logger.debug(f"📊 Fetch Summary:")
-    logger.debug(f"   Finnhub: {len(finnhub_items)} articles")
-    logger.debug(f"   Polygon: {len(polygon_items)} articles")
-    logger.debug(f"   Total: {len(all_items)} articles")
+    logger.info(f"Fetch Summary:")
+    logger.info(f"   Finnhub: {len(finnhub_items)} articles")
+    logger.info(f"   Polygon: {len(polygon_items)} articles")
+    logger.info(f"   Total: {len(all_items)} articles")
     logger.debug("")
     # ========================================
-    # STEP 3.5: Fetch company-specific news (if enabled)
-    # Priority: 3 (Normal - fetch_and_process)
+    # STEP 3: Fetch company-specific news (if enabled)
     # ========================================
     if COMPANY_NEWS_CONFIG['enabled']:
         logger.debug("-" * 70)
-        logger.info("STEP 3.5: Fetch Company-Specific News (Priority 3)")
+        logger.info("STEP 3: Fetch Company-Specific News")
         logger.debug("-" * 70)
         logger.debug("")
         company_items = []
         company_fetch_summary = {}
 
         for symbol, company_name in TRACKED_COMPANIES.items():
-            logger.debug(f"🔍 Fetching news for {symbol} ({company_name})...")
+            logger.info(f"Fetching news for {symbol} ({company_name})...")
             # Get last fetch time for this company
             # Note: fetch_source will be "finnhub_company_{symbol}" to match RawNewsItem
             company_from, company_to = await fetch_state.get_last_fetch_time(
@@ -263,10 +191,10 @@ async def main():
         all_items.extend(company_items)
 
         logger.debug("")
-        logger.debug(f"📊 Company News Fetch Summary:")
+        logger.info(f"Company News Fetch Summary:")
         for symbol, count in company_fetch_summary.items():
-            logger.debug(f"   {symbol}: {count} articles")
-        logger.debug(f"   Total company news: {len(company_items)} articles")
+            logger.info(f"   {symbol}: {count} articles")
+        logger.info(f"   Total company news: {len(company_items)} articles")
         logger.debug("")
     # ========================================
     # STEP 4: Store in raw storage
@@ -276,15 +204,15 @@ async def main():
     logger.debug("-" * 70)
     if all_items:
         storage_stats = await raw_storage.bulk_insert(all_items)
-        logger.debug(f"📊 Storage Results:")
-        logger.debug(f"   Total: {storage_stats['total']}")
-        logger.debug(f"   Inserted: {storage_stats['inserted']}")
-        logger.debug(f"   Duplicates: {storage_stats['duplicates']}")
-        logger.debug(f"   Failed: {storage_stats['failed']}")
+        logger.info(f"Storage Results:")
+        logger.info(f"   Total: {storage_stats['total']}")
+        logger.info(f"   Inserted: {storage_stats['inserted']}")
+        logger.info(f"   Duplicates: {storage_stats['duplicates']}")
+        logger.info(f"   Failed: {storage_stats['failed']}")
         if storage_stats['inserted'] == 0 and storage_stats['duplicates'] > 0:
-            logger.debug(f"   ℹ️  No new updates (all duplicates)")
+            logger.info(f"   No new updates (all duplicates)")
     else:
-        logger.debug("   ℹ️  No news updates")
+        logger.info("   No news updates")
         storage_stats = {'inserted': 0, 'total': 0}
 
     logger.debug("")
@@ -376,16 +304,16 @@ async def main():
                 status="success"
             )
 
-    logger.debug(f"✅ Updated fetch state for all sources")
-    logger.debug(f"   Finnhub max_id: {finnhub_max_id}")
+    logger.info(f"Updated fetch state for all sources")
+    logger.info(f"   Finnhub max_id: {finnhub_max_id}")
     # Display Polygon time in EST
     polygon_latest_est = polygon_latest.replace(tzinfo=UTC).astimezone(EST)
-    logger.debug(f"   Polygon latest: {polygon_latest_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
+    logger.info(f"   Polygon latest: {polygon_latest_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     if COMPANY_NEWS_CONFIG['enabled'] and 'company_items' in locals():
-        logger.debug(f"   Company news: Updated {len(TRACKED_COMPANIES)} companies")
+        logger.info(f"   Company news: Updated {len(TRACKED_COMPANIES)} companies")
     logger.debug("")
     # ========================================
-    # STEP 6: Process with LLM categorization
+    # STEP 6: Process new items with LLM categorization
     # ========================================
     logger.debug("-" * 70)
     logger.info("STEP 6: LLM Categorization & Processing")
@@ -401,7 +329,7 @@ async def main():
             )
 
             if batch_stats['fetched'] == 0:
-                logger.debug("✅ No more unprocessed items")
+                logger.debug("No more unprocessed items")
                 break
 
             total_processed += batch_stats['processed']
@@ -412,30 +340,31 @@ async def main():
                 break
 
         logger.debug("")
-        logger.debug(f"📊 Processing Summary:")
-        logger.debug(f"   Categorized & stored: {total_processed}")
-        logger.debug(f"   NON_FINANCIAL skipped: {total_skipped}")
-        logger.debug(f"   Failed: {total_failed}")
+        logger.info(f"Processing Summary:")
+        logger.info(f"   Categorized & stored: {total_processed}")
+        logger.info(f"   NON_FINANCIAL skipped: {total_skipped}")
+        logger.info(f"   Failed: {total_failed}")
     else:
-        logger.debug("⚠️  No new articles to process")
+        logger.info("No new articles to process")
         total_processed = 0
         total_skipped = 0
 
     logger.debug("")
     # ========================================
-    # STEP 6.5: Data Corrections
+    # STEP 7: Data Corrections
     # ========================================
     logger.debug("-" * 70)
-    logger.info("STEP 6.5: Database Corrections")
+    logger.info("STEP 7: Database Corrections")
     logger.debug("-" * 70)
     correction_stats = await data_corrector.correct_empty_strings_in_stock_news()
+    logger.info(f"Corrected {correction_stats.get('corrected', 0)} empty strings in stock_news")
 
     logger.debug("")
     # ========================================
-    # STEP 7: Show sample categorized news
+    # STEP 8: Show sample categorized news
     # ========================================
     logger.debug("-" * 70)
-    logger.info("STEP 7: Recent Categorized News")
+    logger.info("STEP 8: Recent Categorized News")
     logger.debug("-" * 70)
     if total_processed > 0:
         # Get recent news
@@ -463,38 +392,38 @@ async def main():
                 logger.debug(f"  {title}...")
     logger.debug("")
     # ========================================
-    # STEP 8: Final statistics
+    # STEP 9: Final statistics
     # ========================================
     logger.debug("-" * 70)
-    logger.info("STEP 8: Summary")
+    logger.info("STEP 9: Summary")
     logger.debug("-" * 70)
     raw_stats = await raw_storage.get_stats()
 
-    logger.debug(f"📊 Raw Storage:")
-    logger.debug(f"   Total: {raw_stats['total']}")
-    logger.debug(f"   Pending: {raw_stats['pending']}")
-    logger.debug(f"   Completed: {raw_stats['completed']}")
-    logger.debug(f"   Failed: {raw_stats['failed']}")
+    logger.info(f"Raw Storage:")
+    logger.info(f"   Total: {raw_stats['total']}")
+    logger.info(f"   Pending: {raw_stats['pending']}")
+    logger.info(f"   Completed: {raw_stats['completed']}")
+    logger.info(f"   Failed: {raw_stats['failed']}")
     logger.debug("")
-    logger.debug(f"📊 This Run:")
-    logger.debug(f"   Articles fetched: {len(all_items)}")
-    logger.debug(f"   Articles stored (raw): {storage_stats['inserted']}")
-    logger.debug(f"   Articles categorized: {total_processed + total_skipped}")
-    logger.debug(f"   Financial news stored: {total_processed}")
-    logger.debug(f"   NON_FINANCIAL filtered: {total_skipped}")
+    logger.info(f"This Run:")
+    logger.info(f"   Articles fetched: {len(all_items)}")
+    logger.info(f"   Articles stored (raw): {storage_stats['inserted']}")
+    logger.info(f"   Articles categorized: {total_processed + total_skipped}")
+    logger.info(f"   Financial news stored: {total_processed}")
+    logger.info(f"   NON_FINANCIAL filtered: {total_skipped}")
     logger.debug("")
     # Cleanup
     await general_fetcher.close()
     await categorizer.close()
 
-    logger.debug("=" * 70)
-    logger.info("✅ INCREMENTAL FETCH COMPLETE")
-    logger.debug("=" * 70)
-    logger.debug(f"💡 Next run will fetch:")
-    logger.debug(f"   Finnhub: news with ID > {finnhub_max_id}")
+    logger.info("=" * 70)
+    logger.info("INCREMENTAL FETCH COMPLETE")
+    logger.info("=" * 70)
+    logger.info(f"Next run will fetch:")
+    logger.info(f"   Finnhub: news with ID > {finnhub_max_id}")
     # Display in EST
     polygon_latest_est = polygon_latest.replace(tzinfo=UTC).astimezone(EST)
-    logger.debug(f"   Polygon: news after {polygon_latest_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
+    logger.info(f"   Polygon: news after {polygon_latest_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     logger.debug("")
     
 if __name__ == "__main__":

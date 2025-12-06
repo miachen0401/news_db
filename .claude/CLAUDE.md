@@ -5,6 +5,12 @@
 1. If a function or class is used by two or more parts of the logic, please abstract it into an independent component to avoid duplication.
 2. Follow the “Don’t Repeat Yourself” principle, but apply it with balance. Avoid splitting very small functions (e.g., with only one or two simple clauses), so the code stays easy for engineers to read and understand.
 
+## Logging Config Rules
+1. All print statements must be removed from production code. print blocks the event loop, slows down async execution, and cannot be filtered or routed. Use the project logger for all runtime messages. print is allowed only for temporary local debugging and must not remain in production paths.
+2. All HTTP client logs must be classified as DEBUG level.
+3. High-level pipeline events must use INFO level. Steps such as starting a job, completing a processing stage, counting fetched items, or summarizing work should be logged at INFO. INFO logs should describe what the system is doing, not how HTTP libraries behave.
+4. DEBUG logs should capture detailed internal operations.
+5. INFO logs must remain minimal, meaningful, and high-signal.
 
 ## Documentation: All saved in "docs/"
 ### README.md

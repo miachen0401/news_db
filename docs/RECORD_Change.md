@@ -634,3 +634,457 @@ INCLUDED_CATEGORIES = [
 - ERROR (permanent failures)
 - NON_FINANCIAL (non-market news)
 - Any future invalid categories added to the system
+
+## 2025-12-27 14:00: Created FastAPI server with APScheduler for Render deployment
+Converted fetch_incremental_llm_new.py and generate_daily_summary.py to scheduled FastAPI service for Render cloud deployment.
+
+### Files Created:
+- `api_server.py` - FastAPI app with APScheduler for automatic task scheduling
+- `requirements.txt` - Python dependencies for Render deployment (exported from pyproject.toml)
+- `render.yaml` - Render.com deployment configuration
+
+### Files Modified:
+- `pyproject.toml` - Added fastapi, uvicorn, apscheduler dependencies
+
+### Implementation Details:
+
+**1. FastAPI Server (`api_server.py`):**
+- **Scheduled Tasks:**
+  - `fetch_incremental`: Runs every 4 hours
+  - `daily_summary_morning`: Runs at 7 AM EST (12 PM UTC)
+  - `daily_summary_evening`: Runs at 5 PM EST (10 PM UTC)
+- **HTTP Endpoints:**
+  - `GET /` - Health check with scheduler status
+  - `GET /health` - Simple health check for Render
+  - `GET /status` - Detailed scheduler and job status
+  - `POST /trigger/fetch` - Manually trigger incremental fetch
+  - `POST /trigger/summary` - Manually trigger daily summary
+  - `POST /trigger/all` - Trigger all jobs
+- **Job Tracking:**
+  - Tracks last run time, status, and errors for each job
+  - Background task execution to avoid blocking API responses
+
+**2. Dependencies (`pyproject.toml` and `requirements.txt`):**
+- `fastapi>=0.115.0` - Web framework
+- `uvicorn[standard]>=0.32.0` - ASGI server
+- `apscheduler>=3.10.4` - Task scheduler
+
+**3. Render Configuration (`render.yaml`):**
+- **Web Service (Recommended):**
+  - Always-on service with in-app APScheduler
+  - Requires Render Starter plan ($7/month)
+  - All scheduling handled automatically
+- **Alternative: Cron Jobs (Commented out):**
+  - Use Render's Cron Jobs feature to run scripts
+  - Can use free tier
+  - Requires separate cron job services
+
+### Deployment Options:
+
+**Option 1: In-App Scheduler (Recommended) ✅**
+- Deploy as single Web Service on Render
+- APScheduler runs inside FastAPI app
+- Pros: Simple, everything in one service
+- Cons: Requires paid plan (always-on), uses compute even when idle
+
+**Option 2: Render Cron Jobs**
+- Deploy Web Service + separate Cron Jobs
+- Cron jobs trigger HTTP endpoints on schedule
+- Pros: Only runs when needed, can use free tier
+- Cons: More complex setup (multiple services)
+
+### Automatic Scheduling:
+
+**Yes, automatic scheduling works on Render!** The APScheduler runs inside the FastAPI app and executes tasks automatically:
+- **Every 4 hours**: Incremental news fetch
+- **7 AM EST**: Morning summary
+- **5 PM EST**: Evening summary
+
+No external triggers needed - the scheduler handles everything once deployed.
+
+### Usage:
+
+**Deploy to Render:**
+1. Push code to GitHub
+2. Connect repository to Render
+3. Render auto-detects `render.yaml`
+4. Set environment variables in Render dashboard
+5. Deploy and monitor via `/status` endpoint
+
+**Local Testing:**
+```bash
+# Install dependencies
+uv sync
+
+# Run server
+uv run python api_server.py
+
+# Check status
+curl http://localhost:8000/status
+
+# Manually trigger jobs
+curl -X POST http://localhost:8000/trigger/fetch
+curl -X POST http://localhost:8000/trigger/summary
+```
+
+### Benefits:
+- **Automated execution**: No manual intervention needed
+- **Cloud deployment**: Runs 24/7 on Render infrastructure
+- **Monitoring**: HTTP endpoints for health checks and status
+- **Manual triggers**: Can manually run jobs via API
+- **Error tracking**: Job history with error logs
+- **Scalable**: Easy to add more scheduled tasks
+
+## 2025-12-27 15:00: Unified category validation with single query
+Refactored category validation to use single unified query instead of separate UNCATEGORIZED and invalid category checks.
+
+### Files Modified:
+- `src/db/stock_news.py` - Replaced 4 methods with 2 unified methods
+- `src/processors/llm_news_processor.py` - Replaced 2 methods with 1 unified method
+- `fetch_incremental_llm_new.py` - Simplified to use single validation call
+
+### Key Insight:
+
+**Before:** Separate queries for UNCATEGORIZED and invalid categories
+**After:** Single query for all items needing re-categorization
+
+Since UNCATEGORIZED is NOT in INCLUDED_CATEGORIES, a single query `category NOT IN (valid list)` catches both:
+- UNCATEGORIZED items (failed initial categorization)
+- Invalid categories (hallucinations, typos, old schema)
+
+### Implementation:
+
+**1. Unified Database Methods (`src/db/stock_news.py`):**
+
+Removed (4 methods):
+- ~~`count_uncategorized()`~~
+- ~~`get_uncategorized()`~~
+- ~~`count_invalid_categories()`~~
+- ~~`get_invalid_categories()`~~
+
+Added (2 methods):
+- `count_items_needing_recategorization()` - Single count query
+- `get_items_needing_recategorization(limit)` - Single fetch query
+
+Query logic:
+```python
+# Categories to skip (don't need re-categorization)
+CATEGORIES_TO_SKIP = INCLUDED_CATEGORIES + ["ERROR", "NON_FINANCIAL"]
+
+# Get items where category NOT IN skip list
+# This catches: UNCATEGORIZED + invalid categories
+.not_.in_("category", CATEGORIES_TO_SKIP)
+```
+
+**2. Unified Processor Method (`src/processors/llm_news_processor.py`):**
+
+Removed (2 methods):
+- ~~`recategorize_uncategorized_batch()`~~
+- ~~`recategorize_invalid_categories_batch()`~~
+
+Added (1 method):
+- `recategorize_batch()` - Handles all items needing re-categorization
+
+Features:
+- Single LLM batch call for all problematic items
+- Logs category breakdown before processing
+- Shows old→new category mappings
+- Unified statistics
+
+**3. Simplified Fetch Script (`fetch_incremental_llm_new.py`):**
+- **STEP 1.5** (Priority 2): Validate & Fix Categories
+- Single count query: `count_items_needing_recategorization()`
+- Single processing loop: `recategorize_batch()`
+- Processing order:
+  1. STEP 1: Process pending raw news (Priority 1)
+  2. **STEP 1.5: Validate & fix all categories (Priority 2)** ← UNIFIED
+     - Single query gets all items needing fixes
+     - Single loop processes them all
+     - Shows combined statistics
+  3. STEP 2-3: Fetch and process new news (Priority 3)
+
+### Common Causes of Invalid Categories:
+
+1. **LLM Hallucination:**
+   - LLM returns category names not in our schema
+   - Example: "TECH_INNOVATION" instead of "PRODUCT_TECH_UPDATE"
+
+2. **Schema Changes:**
+   - INCLUDED_CATEGORIES list updated
+   - Old news has categories removed from whitelist
+
+3. **Manual Edits:**
+   - Database edited manually with typos
+   - Example: "COPORATE_EARNINGS" instead of "CORPORATE_EARNINGS"
+
+4. **API Errors:**
+   - LLM returns partial/corrupted responses
+   - JSON parsing issues creating invalid categories
+
+### Validation Workflow:
+
+```
+1. Check stock_news table for invalid categories
+   ↓
+2. If found, log which invalid categories exist
+   ↓
+3. Re-categorize with LLM in batches
+   ↓
+4. Update with corrected categories or mark as:
+   - UNCATEGORIZED (if LLM still can't categorize)
+   - ERROR (if API fails permanently)
+   - NON_FINANCIAL (if non-market news)
+```
+
+### Example Log Output:
+
+```
+STEP 1.5: Validate & Fix Categories (Priority 2)
+Items needing re-categorization: 23
+
+Re-categorizing 23 items with category issues...
+
+Categories needing fixes:
+   UNCATEGORIZED: 8
+   TECH_NEWS: 8
+   COPORATE_EARNINGS: 5
+   MACRO_NOBODY: 2
+
+Sending 23 items to LLM for re-categorization...
+Updated [CORPORATE_EARNINGS] Tesla Q4 earnings report... (TSLA)
+Fixed [TECH_NEWS→PRODUCT_TECH_UPDATE] Apple launches new MacBook...
+Fixed [COPORATE_EARNINGS→CORPORATE_EARNINGS] Tesla earnings beat...
+Fixed [MACRO_NOBODY→GEOPOLITICAL_EVENT] Fed announces rate hike...
+
+Category Validation Summary:
+   Total updated: 20
+   NON_FINANCIAL marked: 1
+   Failed: 2
+```
+
+### Benefits:
+
+- **Simpler Code**: Eliminated duplicate methods (6 methods → 3 methods)
+- **Single Query**: More efficient database access
+- **Unified Processing**: One loop instead of two sequential loops
+- **Better Logging**: Category breakdown shows all issues at once
+- **Data Quality**: Ensures all categories are valid
+- **Schema Evolution**: Handles category list changes gracefully
+- **Error Recovery**: Fixes LLM hallucination issues automatically
+
+### Code Reduction:
+
+**Before:**
+- 4 database methods
+- 2 processor methods
+- 2 separate processing loops in fetch script
+- ~200 lines of duplicate code
+
+**After:**
+- 2 database methods
+- 1 processor method
+- 1 unified processing loop
+- ~100 lines of clean code
+
+**Result:** 50% code reduction, same functionality, better maintainability
+
+### Pre-Filter Optimization:
+
+Added intelligent pre-filtering to avoid unnecessary LLM calls:
+
+**"Nobody" Category Filter:**
+- Before sending items to LLM, check if category contains "nobody" (case-insensitive)
+- Examples: `MACRO_NOBODY`, `Geopolitical_Nobody`, `NOBODY_SPECIFIC`
+- These are too generic/non-specific → auto-mark as `NON_FINANCIAL`
+- Skip LLM call to save API costs
+- Matches filtering logic from raw → cleaned stock flow
+
+**Benefits:**
+- Saves LLM API calls for obvious non-financial items
+- Reduces processing time
+- Maintains consistency with raw news filtering
+- Audit trail preserved in error_log field
+
+**Processing Flow:**
+```
+1. Count all items needing re-categorization: 244
+2. Pre-filter ALL "nobody" categories ONCE: 10 filtered → NON_FINANCIAL
+3. Re-count remaining items: 234
+4. Batch remaining 234 items:
+   - Batch 1: 20 items → LLM
+   - Batch 2: 20 items → LLM
+   - ...
+   - Batch 12: 14 items → LLM
+```
+
+**Example Output:**
+```
+STEP 1.5: Validate & Fix Categories (Priority 2)
+Items needing re-categorization: 244
+
+Pre-filtering 'nobody' categories...
+Pre-filtered 10 'nobody' categories → NON_FINANCIAL
+
+Re-categorizing 234 remaining items with LLM...
+
+Categories needing fixes:
+   UNCATEGORIZED: 120
+   TECH_NEWS: 80
+   COPORATE_EARNINGS: 34
+
+Sending 20 items to LLM...
+[Batch 1 processing...]
+Sending 20 items to LLM...
+[Batch 2 processing...]
+...
+
+LLM Re-categorization Summary:
+   LLM processed: 220
+   NON_FINANCIAL (from LLM): 8
+   Failed: 6
+
+Category Validation Summary:
+   Pre-filtered (nobody): 10  ← Filtered BEFORE batching
+   LLM updated: 220
+   Total fixed: 230
+```
+
+## 2025-12-27 16:00: Separated validation logic into standalone recategorization script
+Decoupled validation/re-categorization from news fetching for cleaner architecture and independent scheduling.
+
+### Files Created:
+- `api/recategorize.py` - Standalone script for validation and re-categorization
+  - STEP 1: Process pending raw news
+  - STEP 2: Validate & fix categories (with pre-filter and LLM batching)
+
+### Files Modified:
+- `api/fetch_incremental_llm_new.py` - Removed validation steps, now focused on fetching only
+  - Removed STEP 1 (pending raw news processing)
+  - Removed STEP 1.5 (category validation)
+  - Renumbered remaining steps (STEP 1-9)
+  - Now handles: fetch → store → process new items → statistics
+- `api_server.py` - Updated scheduler with two separate jobs
+  - Added `run_recategorize_existing()` wrapper function
+  - Added "recategorize_existing" to job_status tracking
+  - **New schedule**: Recategorization every 4 hours
+  - **Updated schedule**: Fetch every 1 hour (was 4 hours)
+  - Daily summary: 7 AM and 5 PM EST (unchanged)
+  - Added manual trigger endpoint: `POST /trigger/recategorize`
+  - Updated `/trigger/all` to include all three jobs
+
+### Documentation Updated:
+- `docs/API_USAGE.md` - Added recategorization endpoint documentation
+  - Added `/trigger/recategorize` to endpoint table
+  - Updated scheduled jobs to show correct intervals
+  - Added section 5 for re-categorization trigger
+  - Updated Python script example with `trigger_recategorize()` function
+  - Updated all job status examples to include recategorize_existing
+- `QUICK_API_REFERENCE.md` - Added quick reference commands
+  - Added recategorize trigger commands (local and production)
+  - Added Python one-liner for recategorization
+  - Added description of what recategorize job does
+
+### Scheduling Changes:
+
+**Before:**
+- Fetch + Validation: Every 4 hours (combined)
+- Daily Summary: 7 AM and 5 PM EST
+
+**After:**
+- **Fetch**: Every 1 hour (faster news updates)
+- **Recategorize**: Every 4 hours (independent validation)
+- **Daily Summary**: 7 AM and 5 PM EST (unchanged)
+
+### Architecture Benefits:
+
+1. **Separation of Concerns:**
+   - News fetching script focuses only on fetching new news
+   - Recategorization script handles validation and fixing
+   - Each script has single responsibility
+
+2. **Independent Scheduling:**
+   - Fetch runs more frequently (hourly) for fresher news
+   - Validation runs less frequently (4 hours) as needed
+   - Can adjust schedules independently
+
+3. **Cleaner Code:**
+   - `api/fetch_incremental_llm_new.py` simplified (removed 2 steps)
+   - `api/recategorize.py` handles all validation logic
+   - No mixed concerns in single script
+
+4. **Better Monitoring:**
+   - Separate job status tracking for each task
+   - Can see last run time for fetch vs recategorization
+   - Independent error tracking
+
+5. **Flexibility:**
+   - Can manually trigger validation without re-fetching
+   - Can manually fetch without re-validating
+   - Can run both together or separately
+
+### API Endpoints:
+
+**Manual Triggers:**
+- `POST /trigger/fetch` - Fetch incremental news
+- `POST /trigger/recategorize` - Re-categorize existing news
+- `POST /trigger/summary` - Generate daily summary
+- `POST /trigger/all` - Run all three jobs
+
+**Example Usage:**
+```bash
+# Trigger re-categorization only
+curl -X POST http://localhost:8000/trigger/recategorize
+
+# Trigger all jobs
+curl -X POST http://localhost:8000/trigger/all
+
+# Check status
+curl http://localhost:8000/status
+```
+
+### Benefits:
+- **Faster News Updates**: Hourly fetching instead of every 4 hours
+- **Efficient Validation**: Runs every 4 hours as needed
+- **Independent Jobs**: Each job can be monitored/debugged separately
+- **Cleaner Architecture**: Single responsibility per script
+- **Flexible Execution**: Can trigger any job independently
+
+## 2025-12-27 16:30: Reorganized API scripts into dedicated folder
+Moved scheduled task scripts to `api/` folder and renamed recategorization script for consistency.
+
+### File Changes:
+
+**Renamed:**
+- `recategorize_existing.py` → `api/recategorize.py`
+
+**Moved to `api/` folder:**
+- `fetch_incremental_llm_new.py` → `api/fetch_incremental_llm_new.py`
+- `generate_daily_summary.py` → `api/generate_daily_summary.py`
+
+### Files Modified:
+- `api_server.py` - Updated import statements
+  - Changed: `from recategorize_existing import main` → `from api.recategorize import main`
+  - Changed: `from fetch_incremental_llm_new import main` → `from api.fetch_incremental_llm_new import main`
+  - Changed: `from generate_daily_summary import main` → `from api.generate_daily_summary import main`
+  - Updated dynamic import: `import generate_daily_summary` → `from api import generate_daily_summary`
+
+### Module Path Fix:
+Added parent directory to `sys.path` in all three scripts to ensure `src` module can be found:
+```python
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+```
+
+This allows scripts to be run directly from any location:
+```bash
+uv run api/recategorize.py
+uv run api/fetch_incremental_llm_new.py
+uv run api/generate_daily_summary.py
+```
+
+### Benefits:
+- **Better Organization**: All API-related scripts in dedicated `api/` folder
+- **Cleaner Root**: Root directory less cluttered
+- **Consistent Naming**: `recategorize.py` matches endpoint name `/trigger/recategorize`
+- **Clear Separation**: Core logic separated from API execution scripts
+- **Portable Execution**: Scripts can be run from any location

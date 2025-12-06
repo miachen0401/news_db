@@ -4,6 +4,9 @@ from datetime import datetime
 from supabase import Client
 import asyncio
 import logging
+
+from src.config import INCLUDED_CATEGORIES
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,7 +54,7 @@ class StockNewsDB:
 
                 dup_result = await asyncio.to_thread(_check_dup)
                 if dup_result.data:
-                    logger.debug(f"⚠️  Duplicate URL detected, skipping: {url[:50]}...")
+                    logger.debug(f"Duplicate URL detected, skipping: {url[:50]}...")
                     return None
 
             # Prepare news item (no position_in_stack)
@@ -84,23 +87,35 @@ class StockNewsDB:
             return None
 
         except Exception as e:
-            logger.debug(f"❌ Error inserting news: {e}")
+            logger.debug(f"Error inserting news: {e}")
             return None
 
-    async def count_uncategorized(self) -> int:
+    async def count_items_needing_recategorization(self) -> int:
         """
-        Count UNCATEGORIZED news items.
+        Count items that need re-categorization.
+
+        Items needing re-categorization include:
+        - UNCATEGORIZED: Failed initial categorization
+        - Invalid categories: Not in INCLUDED_CATEGORIES list (LLM hallucinations, typos)
+
+        Excludes:
+        - ERROR: Permanent failures (don't retry)
+        - NON_FINANCIAL: Correctly categorized as non-market news
 
         Returns:
-            Number of UNCATEGORIZED items
+            Number of items needing re-categorization
         """
+        # Valid categories that DON'T need re-categorization
+        # = INCLUDED_CATEGORIES + categories we explicitly don't want to retry
+        CATEGORIES_TO_SKIP = INCLUDED_CATEGORIES + ["ERROR", "NON_FINANCIAL"]
+
         try:
             def _count():
                 return (
                     self.client
                     .table(self.table_name)
                     .select("id", count="exact")
-                    .eq("category", "UNCATEGORIZED")
+                    .not_.in_("category", CATEGORIES_TO_SKIP)
                     .execute()
                 )
 
@@ -108,28 +123,41 @@ class StockNewsDB:
             return result.count or 0
 
         except Exception as e:
-            logger.debug(f"❌ Error counting uncategorized news: {e}")
+            logger.debug(f"Error counting items needing recategorization: {e}")
             return 0
 
-    async def get_uncategorized(self, limit: int = 100) -> List[Dict[str, Any]]:
+    async def get_items_needing_recategorization(self, limit: int = 100) -> List[Dict[str, Any]]:
         """
-        Get UNCATEGORIZED news items for re-processing.
+        Get items that need re-categorization.
 
-        Note: Excludes items with category='ERROR' to prevent infinite retry loops.
+        This unified method replaces separate get_uncategorized() and get_invalid_categories()
+        by querying all items with categories not in the valid list.
+
+        Items returned include:
+        - UNCATEGORIZED: Failed initial categorization, need retry
+        - Invalid categories: Categories not in INCLUDED_CATEGORIES (hallucinations, typos, old schema)
+
+        Excludes:
+        - ERROR: Permanent failures (don't retry to avoid infinite loops)
+        - NON_FINANCIAL: Correctly categorized as non-market news
+        - All valid financial categories from INCLUDED_CATEGORIES
 
         Args:
             limit: Maximum number of items to fetch
 
         Returns:
-            List of UNCATEGORIZED news items (excluding ERROR items)
+            List of news items needing re-categorization, ordered by created_at (oldest first)
         """
+        # Valid categories that DON'T need re-categorization
+        CATEGORIES_TO_SKIP = INCLUDED_CATEGORIES + ["ERROR", "NON_FINANCIAL"]
+
         try:
             def _fetch():
                 return (
                     self.client
                     .table(self.table_name)
                     .select("*")
-                    .eq("category", "UNCATEGORIZED")
+                    .not_.in_("category", CATEGORIES_TO_SKIP)
                     .order("created_at", desc=False)  # Process oldest first
                     .limit(limit)
                     .execute()
@@ -139,7 +167,7 @@ class StockNewsDB:
             return result.data or []
 
         except Exception as e:
-            logger.debug(f"❌ Error getting uncategorized news: {e}")
+            logger.debug(f"Error getting items needing recategorization: {e}")
             return []
 
     async def update_category(
@@ -185,8 +213,9 @@ class StockNewsDB:
             return result.data is not None
 
         except Exception as e:
-            logger.debug(f"❌ Error updating category: {e}")
+            logger.debug(f"Error updating category: {e}")
             return False
+
 
     async def get_stats(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -217,5 +246,5 @@ class StockNewsDB:
             return stats
 
         except Exception as e:
-            logger.debug(f"❌ Error getting stats: {e}")
+            logger.debug(f"Error getting stats: {e}")
             return {"total": 0}

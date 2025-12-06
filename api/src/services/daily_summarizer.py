@@ -150,15 +150,15 @@ Generate the daily highlights below:
                 result = response.json()
                 summary = result['choices'][0]['message']['content'].strip()
 
-                logger.debug(f"✅ Generated daily summary ({len(news_items)} articles)")
+                logger.debug(f"Generated daily summary ({len(news_items)} articles)")
                 return summary
             else:
-                logger.debug(f"❌ LLM API error: {response.status_code}")
-                logger.debug(f"   Response: {response.text}")
+                logger.debug(f"LLM API error: {response.status_code}")
+                logger.debug(f"Response: {response.text}")
                 return None
 
         except Exception as e:
-            logger.debug(f"❌ Error generating daily summary: {e}")
+            logger.debug(f"Error generating daily summary: {e}")
             return None
 
     async def close(self):

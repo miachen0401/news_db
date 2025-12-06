@@ -1,8 +1,14 @@
 """Generate daily news summary and save to daily_highlights table."""
+# Add api directory to path so src module can be found (must be first)
+import sys
+from pathlib import Path
+_api_dir = str(Path(__file__).parent.resolve())
+if _api_dir not in sys.path:
+    sys.path.insert(0, _api_dir)
+
 import asyncio
 import os
-from pathlib import Path
-from datetime import datetime, date, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client
 
@@ -15,6 +21,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
+# Set httpx logging to WARNING to suppress HTTP request logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # EST timezone (UTC-5) - for user input/display only
 EST = timezone(timedelta(hours=-5))
@@ -26,17 +34,17 @@ LOG_DIR = Path(__file__).parent / ".log"
 # ============================================
 # CONFIGURATION: Change these as needed
 # ============================================
-SUMMARY_DATE = "2025-12-02"  # None = today, or specify date like "2025-11-23"
+SUMMARY_DATE = "2025-12-03"  # None = today, or specify date like "2025-11-23"
 SUMMARY_TIME = "18:00:00"  # None = now, or specify time like "17:00:00"
 
 
 async def main():
     """Generate daily summary for stock news."""
-    logger.debug("=" * 70)
-    logger.info("📊 DAILY NEWS SUMMARY GENERATOR")
-    logger.debug("=" * 70)
+    logger.info("=" * 70)
+    logger.info("DAILY NEWS SUMMARY GENERATOR")
+    logger.info("=" * 70)
     now_est = datetime.now(UTC).astimezone(EST)
-    logger.debug(f"Run time: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
+    logger.info(f"Run time: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     logger.debug("")
     # Load environment
     env_path = Path(__file__).parent / ".env"
@@ -48,10 +56,10 @@ async def main():
 
     # Validate
     if not all([zhipu_api_key, supabase_url, supabase_key]):
-        logger.debug("❌ Missing required environment variables")
+        logger.info("Missing required environment variables")
         return
 
-    logger.debug("✅ Configuration loaded")
+    logger.info("Configuration loaded")
     logger.debug("")
     # Initialize clients
     supabase = create_client(supabase_url, supabase_key)
@@ -106,7 +114,7 @@ async def main():
         result = await asyncio.to_thread(_fetch_news)
         news_items = result.data or []
 
-        logger.debug(f"📰 Fetched {len(news_items)} news articles (only including {len(INCLUDED_CATEGORIES)} valid categories)")
+        logger.info(f"Fetched {len(news_items)} news articles (only including {len(INCLUDED_CATEGORIES)} valid categories)")
         # Count by category
         category_counts = {}
         for item in news_items:
@@ -114,12 +122,12 @@ async def main():
             category_counts[cat] = category_counts.get(cat, 0) + 1
 
         if category_counts:
-            logger.debug(f"\n📊 News by Category:")
+            logger.info(f"News by Category:")
             for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
-                logger.debug(f"   {cat}: {count}")
+                logger.info(f"   {cat}: {count}")
         logger.debug("")
     except Exception as e:
-        logger.debug(f"❌ Error fetching news: {e}")
+        logger.info(f"Error fetching news: {e}")
         return
 
     # ========================================
@@ -129,17 +137,17 @@ async def main():
     logger.info("STEP 2: Generate Daily Summary")
     logger.debug("-" * 70)
     if len(news_items) == 0:
-        logger.debug("⚠️  No news found in time window")
+        logger.info("No news found in time window")
         highlight_text = f"No significant news from {from_time_est.strftime('%m/%d %H:%M')} to {to_time_est.strftime('%m/%d %H:%M')} EST."
     else:
-        logger.debug(f"🤖 Generating summary using GLM-4-flash...")
+        logger.info(f"Generating summary using GLM-4-flash...")
         highlight_text = await summarizer.generate_daily_summary(
             news_items=news_items,
             temperature=0.3
         )
 
         if not highlight_text:
-            logger.debug("❌ Failed to generate summary")
+            logger.info("Failed to generate summary")
             return
 
     logger.debug("")
@@ -184,10 +192,10 @@ async def main():
         with open(log_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(log_content))
 
-        logger.debug(f"✅ Saved to log file: {log_path}")
-        logger.debug(f"   File size: {log_path.stat().st_size} bytes")
+        logger.info(f"Saved to log file: {log_path}")
+        logger.info(f"   File size: {log_path.stat().st_size} bytes")
     except Exception as e:
-        logger.debug(f"❌ Error saving log file: {e}")
+        logger.info(f"Error saving log file: {e}")
     logger.debug("")
     # Display summary in terminal (shortened)
     logger.debug("=" * 70)
@@ -218,21 +226,21 @@ async def main():
     )
 
     if success:
-        logger.debug(f"✅ Saved to database")
+        logger.info(f"Saved to database")
     else:
-        logger.debug(f"❌ Failed to save to database")
+        logger.info(f"Failed to save to database")
     logger.debug("")
     # Cleanup
     await summarizer.close()
 
-    logger.debug("=" * 70)
-    logger.debug("✅ DAILY SUMMARY COMPLETE")
-    logger.debug("=" * 70)
-    logger.debug(f"📅 Date: {summary_date_est} (EST)")
-    logger.debug(f"🕐 Time: {summary_time_est} (EST)")
-    logger.debug(f"📰 News Count: {len(news_items)}")
-    logger.debug(f"📝 Summary Length: {len(highlight_text)} characters")
-    logger.debug(f"📄 Log File: {log_path}")
+    logger.info("=" * 70)
+    logger.info("DAILY SUMMARY COMPLETE")
+    logger.info("=" * 70)
+    logger.info(f"Date: {summary_date_est} (EST)")
+    logger.info(f"Time: {summary_time_est} (EST)")
+    logger.info(f"News Count: {len(news_items)}")
+    logger.info(f"Summary Length: {len(highlight_text)} characters")
+    logger.info(f"Log File: {log_path}")
     logger.debug("")
 if __name__ == "__main__":
     asyncio.run(main())

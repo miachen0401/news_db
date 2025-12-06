@@ -1,0 +1,86 @@
+services:
+  # Main API Service with Scheduler
+  - type: web
+    name: news-fetcher-api
+    runtime: python
+    region: oregon  # Change to your preferred region
+    plan: starter  # Use 'starter' for paid plan with always-on service
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api_server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: FINNHUB_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: MASSIVE_API_KEY
+        sync: false
+      - key: ZHIPU_API_KEY
+        sync: false
+      - key: SUPABASE_NEWS_URL
+        sync: false
+      - key: SUPABASE_NEWS_KEY
+        sync: false
+    autoDeploy: true
+
+  # Optional: Separate Cron Jobs (if you prefer cron over in-app scheduler)
+  # Uncomment these if you want to use Render Cron Jobs instead of APScheduler
+  # Note: You'll need to disable the scheduler in api_server.py if using these
+
+  # - type: cron
+  #   name: news-fetch-cron
+  #   runtime: python
+  #   region: oregon
+  #   plan: free  # Cron jobs can use free tier
+  #   branch: main
+  #   schedule: "0 */6 * * *"  # Every 6 hours
+  #   buildCommand: pip install -r requirements.txt
+  #   startCommand: python fetch_incremental_llm_new.py
+  #   envVars:
+  #     - key: PYTHON_VERSION
+  #       value: 3.11.0
+  #     - fromGroup: news-env-vars  # Reference environment variable group
+
+  # - type: cron
+  #   name: news-summary-morning-cron
+  #   runtime: python
+  #   region: oregon
+  #   plan: free
+  #   branch: main
+  #   schedule: "0 12 * * *"  # 12 PM UTC = 7 AM EST
+  #   buildCommand: pip install -r requirements.txt
+  #   startCommand: python generate_daily_summary.py
+  #   envVars:
+  #     - key: PYTHON_VERSION
+  #       value: 3.11.0
+  #     - fromGroup: news-env-vars
+
+  # - type: cron
+  #   name: news-summary-evening-cron
+  #   runtime: python
+  #   region: oregon
+  #   plan: free
+  #   branch: main
+  #   schedule: "0 22 * * *"  # 10 PM UTC = 5 PM EST
+  #   buildCommand: pip install -r requirements.txt
+  #   startCommand: python generate_daily_summary.py
+  #   envVars:
+  #     - key: PYTHON_VERSION
+  #       value: 3.11.0
+  #     - fromGroup: news-env-vars
+
+# Optional: Environment variable groups (for reuse across services)
+# envVarGroups:
+#   - name: news-env-vars
+#     envVars:
+#       - key: FINNHUB_API_KEY
+#         sync: false
+#       - key: MASSIVE_API_KEY
+#         sync: false
+#       - key: ZHIPU_API_KEY
+#         sync: false
+#       - key: SUPABASE_NEWS_URL
+#         sync: false
+#       - key: SUPABASE_NEWS_KEY
+#         sync: false

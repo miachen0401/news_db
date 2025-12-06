@@ -68,7 +68,7 @@ class LLMNewsProcessor:
             }
 
         except Exception as e:
-            logger.debug(f"❌ Error extracting content: {e}")
+            logger.debug(f"Error extracting content: {e}")
             return None
 
     def _build_processed_data(
@@ -141,7 +141,7 @@ class LLMNewsProcessor:
             return processed_data
 
         except Exception as e:
-            logger.debug(f"❌ Error building processed data: {e}")
+            logger.debug(f"Error building processed data: {e}")
             return None
 
     async def process_raw_item(
@@ -188,7 +188,7 @@ class LLMNewsProcessor:
                     item_id,
                     ProcessingStatus.COMPLETED
                 )
-                logger.debug(f"⏭️  Skipped NON_FINANCIAL: {processed_data['title'][:50]}...")
+                logger.debug(f"Skipped NON_FINANCIAL: {processed_data['title'][:50]}...")
                 return True  # Mark as successful but don't store
 
             # Handle ERROR category - store with error_log
@@ -196,7 +196,7 @@ class LLMNewsProcessor:
                 error_log = categorization.get("api_error", "Unknown error")
                 # Store ERROR items so they can be manually reviewed
                 processed_data["metadata"]["error_log"] = error_log
-                logger.debug(f"⚠️  ERROR category: {processed_data['title'][:50]}... - {error_log[:50]}")
+                logger.debug(f"ERROR category: {processed_data['title'][:50]}... - {error_log[:50]}")
             # Store in stock_news table (no LIFO stack, just insert)
             result = await self.stock_news_db.insert_news(processed_data)
 
@@ -207,7 +207,7 @@ class LLMNewsProcessor:
                 )
                 cat = processed_data.get('category', '')
                 sec_cat = processed_data.get('secondary_category', '')
-                logger.debug(f"✅ Stored [{cat}] {processed_data['title'][:45]}... ({sec_cat or 'general'})")
+                logger.debug(f"Stored [{cat}] {processed_data['title'][:45]}... ({sec_cat or 'general'})")
                 return True
             else:
                 await self.raw_storage.update_processing_status(
@@ -224,7 +224,7 @@ class LLMNewsProcessor:
                 ProcessingStatus.FAILED,
                 error_log=error_msg
             )
-            logger.debug(f"❌ {error_msg}")
+            logger.debug(f"{error_msg}")
             return False
 
     async def process_unprocessed_batch(self, limit: int = 50) -> Dict[str, int]:
@@ -265,7 +265,7 @@ class LLMNewsProcessor:
 
         # Categorize with LLM in batch
         if news_for_llm:
-            logger.debug(f"🤖 Sending {len(news_for_llm)} items to LLM for categorization...")
+            logger.info(f"Sending {len(news_for_llm)} items to LLM for categorization...")
             categorized = await self.categorizer.categorize_batch(
                 news_for_llm,
                 batch_size=LLM_CONFIG['batch_size']
@@ -288,16 +288,103 @@ class LLMNewsProcessor:
                 else:
                     stats["failed"] += 1
 
-        logger.debug(f"✅ Processing complete:")
-        logger.debug(f"   Categorized: {stats['categorized']}")
-        logger.debug(f"   Stored: {stats['processed']}")
-        logger.debug(f"   NON_FINANCIAL skipped: {stats['non_financial_skipped']}")
-        logger.debug(f"   Failed: {stats['failed']}")
+        logger.info(f"Processing complete:")
+        logger.info(f"   Categorized: {stats['categorized']}")
+        logger.info(f"   Stored: {stats['processed']}")
+        logger.info(f"   NON_FINANCIAL skipped: {stats['non_financial_skipped']}")
+        logger.info(f"   Failed: {stats['failed']}")
         return stats
 
-    async def recategorize_uncategorized_batch(self, limit: int = 50) -> Dict[str, int]:
+    async def prefilter_nobody_categories(self) -> int:
         """
-        Re-process UNCATEGORIZED news items in stock_news table.
+        Pre-filter items with "nobody" in category name.
+
+        Categories containing "nobody" are too generic/non-specific.
+        Mark them as NON_FINANCIAL directly without LLM calls.
+
+        Returns:
+            Number of items filtered
+        """
+        # Get ALL items needing re-categorization
+        all_items = await self.stock_news_db.get_items_needing_recategorization(limit=1000)
+
+        if not all_items:
+            return 0
+
+        nobody_filtered = 0
+
+        for item in all_items:
+            category = item.get("category", "")
+            item_id = item.get("id")
+
+            # Check if category contains "nobody" (case-insensitive)
+            if "nobody" in category.lower():
+                # Mark as NON_FINANCIAL directly
+                success = await self.stock_news_db.update_category(
+                    item_id=item_id,
+                    category="NON_FINANCIAL",
+                    secondary_category="",
+                    error_log=f"Auto-filtered: category contained 'nobody' ({category})"
+                )
+                if success:
+                    nobody_filtered += 1
+                    logger.debug(f"Filtered [{category}→NON_FINANCIAL] {item.get('title', '')[:50]}...")
+
+        return nobody_filtered
+
+    async def normalize_space_categories(self) -> int:
+        """
+        Normalize categories with spaces to underscores.
+
+        Fixes categories like "CORPORATE ACTION" → "CORPORATE_ACTION".
+
+        Returns:
+            Number of items normalized
+        """
+        # Import the normalize function
+        from src.services.llm_categorizer import normalize_category
+
+        # Get ALL items needing re-categorization
+        all_items = await self.stock_news_db.get_items_needing_recategorization(limit=1000)
+
+        if not all_items:
+            return 0
+
+        normalized_count = 0
+
+        for item in all_items:
+            category = item.get("category", "")
+            item_id = item.get("id")
+
+            # Check if category contains spaces or needs normalization
+            if ' ' in category or '-' in category:
+                normalized_category = normalize_category(category)
+
+                # Only update if the normalized version is different
+                if normalized_category != category:
+                    success = await self.stock_news_db.update_category(
+                        item_id=item_id,
+                        category=normalized_category,
+                        secondary_category=item.get("secondary_category", ""),
+                        error_log=f"Auto-normalized: '{category}' → '{normalized_category}'"
+                    )
+                    if success:
+                        normalized_count += 1
+                        logger.debug(f"Normalized [{category}→{normalized_category}] {item.get('title', '')[:50]}...")
+
+        return normalized_count
+
+    async def recategorize_batch(self, limit: int = 50) -> Dict[str, int]:
+        """
+        Re-process items needing re-categorization (UNCATEGORIZED + invalid categories).
+
+        This unified method handles all items with problematic categories:
+        - UNCATEGORIZED: Failed initial categorization
+        - Invalid categories: Not in INCLUDED_CATEGORIES (LLM hallucinations, typos, old schema)
+
+        Excludes:
+        - ERROR: Permanent failures (don't retry)
+        - NON_FINANCIAL: Correctly categorized
 
         Args:
             limit: Maximum number of items to re-process
@@ -313,17 +400,30 @@ class LLMNewsProcessor:
             "failed": 0
         }
 
-        # Get UNCATEGORIZED items from stock_news
-        uncategorized = await self.stock_news_db.get_uncategorized(limit=limit)
-        stats["fetched"] = len(uncategorized)
+        # Get all items needing re-categorization (unified query)
+        items_to_fix = await self.stock_news_db.get_items_needing_recategorization(limit=limit)
+        stats["fetched"] = len(items_to_fix)
 
-        if not uncategorized:
+        if not items_to_fix:
             return stats
 
-        logger.debug(f"🔄 Re-processing {stats['fetched']} UNCATEGORIZED news items...")
+        logger.debug(f"🔄 Re-processing {stats['fetched']} items needing re-categorization...")
+
+        # Log the categories found (for audit trail)
+        category_breakdown = {}
+        for item in items_to_fix:
+            cat = item.get("category", "UNKNOWN")
+            category_breakdown[cat] = category_breakdown.get(cat, 0) + 1
+
+        logger.info(f"Categories needing fixes:")
+        for cat, count in sorted(category_breakdown.items(), key=lambda x: -x[1]):
+            logger.info(f"   {cat}: {count}")
+
+        logger.debug("")
+
         # Extract titles and summaries for LLM
         news_for_llm = []
-        for item in uncategorized:
+        for item in items_to_fix:
             title = item.get("title", "")
             summary = item.get("summary", "")
             if title:
@@ -335,7 +435,7 @@ class LLMNewsProcessor:
 
         # Categorize with LLM in batch
         if news_for_llm:
-            logger.debug(f"🤖 Sending {len(news_for_llm)} items to LLM for re-categorization...")
+            logger.info(f"Sending {len(news_for_llm)} items to LLM for re-categorization...")
             categorized = await self.categorizer.categorize_batch(
                 news_for_llm,
                 batch_size=LLM_CONFIG['batch_size']
@@ -349,6 +449,7 @@ class LLMNewsProcessor:
                     continue
 
                 item_id = stock_item.get("id")
+                old_category = stock_item.get("category", "UNKNOWN")
                 new_category = item_data.get("primary_category", "UNCATEGORIZED")
                 new_secondary = item_data.get("secondary_category", "")
                 api_error = item_data.get("api_error", None)
@@ -364,19 +465,27 @@ class LLMNewsProcessor:
                     )
                     if success:
                         stats["failed"] += 1
-                        logger.debug(f"❌ ERROR (will not retry): {stock_item.get('title', '')[:40]}... - {error_log[:50]}")
+                        logger.debug(f"ERROR (will not retry): {stock_item.get('title', '')[:40]}... - {error_log[:50]}")
                     continue
 
-                # If still UNCATEGORIZED after retry, skip (will retry next time)
+                # If still UNCATEGORIZED after retry, mark it
                 if new_category == "UNCATEGORIZED":
-                    stats["failed"] += 1
-                    logger.debug(f"⚠️  Still UNCATEGORIZED: {stock_item.get('title', '')[:50]}...")
+                    success = await self.stock_news_db.update_category(
+                        item_id=item_id,
+                        category="UNCATEGORIZED",
+                        secondary_category="",
+                        error_log=f"Changed from invalid category: {old_category}"
+                    )
+                    if success:
+                        stats["failed"] += 1
+                        logger.debug(f"Changed to UNCATEGORIZED (was {old_category}): {stock_item.get('title', '')[:50]}...")
                     continue
 
                 # If NON_FINANCIAL, update category
                 if new_category == "NON_FINANCIAL":
                     stats["non_financial_removed"] += 1
-                    logger.debug(f"🗑️  Marked as NON_FINANCIAL: {stock_item.get('title', '')[:50]}...")
+                    logger.debug(f"Marked as NON_FINANCIAL (was {old_category}): {stock_item.get('title', '')[:50]}...")
+
                 # Update category (clear error_log if previously had error)
                 success = await self.stock_news_db.update_category(
                     item_id=item_id,
@@ -387,13 +496,16 @@ class LLMNewsProcessor:
 
                 if success:
                     stats["updated"] += 1
-                    logger.debug(f"✅ Updated [{new_category}] {stock_item.get('title', '')[:45]}... ({new_secondary or 'general'})")
+                    if old_category != new_category:
+                        logger.debug(f"Fixed [{old_category}→{new_category}] {stock_item.get('title', '')[:45]}... ({new_secondary or 'general'})")
+                    else:
+                        logger.debug(f"Updated [{new_category}] {stock_item.get('title', '')[:45]}... ({new_secondary or 'general'})")
                 else:
                     stats["failed"] += 1
 
-        logger.debug(f"✅ Re-categorization complete:")
-        logger.debug(f"   Re-categorized: {stats['recategorized']}")
-        logger.debug(f"   Updated: {stats['updated']}")
-        logger.debug(f"   NON_FINANCIAL marked: {stats['non_financial_removed']}")
-        logger.debug(f"   Failed: {stats['failed']}")
+        logger.info(f"Re-categorization complete:")
+        logger.info(f"   Re-categorized: {stats['recategorized']}")
+        logger.info(f"   Updated: {stats['updated']}")
+        logger.info(f"   NON_FINANCIAL marked: {stats['non_financial_removed']}")
+        logger.info(f"   Failed: {stats['failed']}")
         return stats

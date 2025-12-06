@@ -9,6 +9,33 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def normalize_category(category: str) -> str:
+    """
+    Normalize category name to match expected format.
+
+    - Converts to uppercase
+    - Replaces spaces with underscores
+    - Handles common variations
+
+    Args:
+        category: Raw category name from LLM
+
+    Returns:
+        Normalized category name
+    """
+    if not category:
+        return category
+
+    # Convert to uppercase and replace spaces with underscores
+    normalized = category.upper().strip().replace(' ', '_').replace('-', '_')
+
+    # Handle multiple underscores
+    while '__' in normalized:
+        normalized = normalized.replace('__', '_')
+
+    return normalized
+
+
 
 class NewsCategorizer:
     """Categorizes news using Zhipu AI model with concurrency control."""
@@ -144,26 +171,26 @@ Output only the JSON array, no additional text."""
                 elif response.status_code == 429 and retry_count < self.max_retries:
                     # Rate limit exceeded, wait and retry
                     wait_time = (retry_count + 1) * 5  # Exponential backoff: 5s, 10s, 15s
-                    logger.debug(f"⚠️  Rate limit hit (429), retrying in {wait_time}s... (attempt {retry_count + 1}/{self.max_retries})")
+                    logger.debug(f"Rate limit hit (429), retrying in {wait_time}s... (attempt {retry_count + 1}/{self.max_retries})")
                     await asyncio.sleep(wait_time)
                     return await self._call_llm_api(prompt, retry_count + 1)
 
                 else:
                     # Permanent error - return error details
                     error_msg = f"API Error {response.status_code}: {response.text[:200]}"
-                    logger.debug(f"❌ Zhipu API error: {response.status_code}")
+                    logger.debug(f"Zhipu API error: {response.status_code}")
                     logger.debug(f"Response: {response.text}")
                     return (None, error_msg)
 
             except Exception as e:
                 if retry_count < self.max_retries:
                     wait_time = (retry_count + 1) * 3
-                    logger.debug(f"⚠️  API call failed: {e}, retrying in {wait_time}s...")
+                    logger.debug(f"API call failed: {e}, retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     return await self._call_llm_api(prompt, retry_count + 1)
                 else:
                     error_msg = f"Exception after {self.max_retries} retries: {str(e)}"
-                    logger.debug(f"❌ Error calling LLM API after {self.max_retries} retries: {e}")
+                    logger.debug(f"Error calling LLM API after {self.max_retries} retries: {e}")
                     return (None, error_msg)
 
     async def categorize_batch(
@@ -190,7 +217,7 @@ Output only the JSON array, no additional text."""
         for i in range(0, len(news_items), batch_size):
             batch = news_items[i:i + batch_size]
 
-            logger.debug(f"🤖 Categorizing batch {i//batch_size + 1} ({len(batch)} items)...")
+            logger.debug(f"Categorizing batch {i//batch_size + 1} ({len(batch)} items)...")
             try:
                 prompt = self._build_categorization_prompt(batch)
 
@@ -211,6 +238,10 @@ Output only the JSON array, no additional text."""
                         # Map results back to news items
                         for j, result in enumerate(results):
                             if j < len(batch):
+                                # Normalize the primary_category
+                                if 'primary_category' in result:
+                                    result['primary_category'] = normalize_category(result['primary_category'])
+
                                 batch[j]['categorization'] = result
                                 all_results.append({
                                     **batch[j],
@@ -218,9 +249,9 @@ Output only the JSON array, no additional text."""
                                     'api_error': None  # No error
                                 })
 
-                        logger.debug(f"✅ Categorized {len(results)} items")
+                        logger.debug(f"Categorized {len(results)} items")
                     except json.JSONDecodeError as e:
-                        logger.debug(f"⚠️  Failed to parse LLM response: {e}")
+                        logger.debug(f"Failed to parse LLM response: {e}")
                         logger.debug(f"Response: {content[:200]}")
                         # Add items with parsing error
                         parse_error = f"JSON parse error: {str(e)}"
@@ -248,7 +279,7 @@ Output only the JSON array, no additional text."""
                 await asyncio.sleep(self.delay_between_batches)
 
             except Exception as e:
-                logger.debug(f"❌ Error categorizing batch: {e}")
+                logger.debug(f"Error categorizing batch: {e}")
                 # Add items with exception error
                 exception_error = f"Batch processing exception: {str(e)}"
                 for item in batch:

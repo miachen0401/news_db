@@ -6,11 +6,11 @@ logger = logging.getLogger(__name__)
 # LLM Model Configuration
 LLM_MODELS = {
     "categorization": {
-        "model": "glm-4-flash",           # Zhipu AI model for categorization
+        "model": "glm-4.5-air",           # Zhipu AI model for categorization
         "temperature": 0.3,               # Lower = more consistent
         "timeout": 60.0,                  # Request timeout in seconds
         "max_retries": 2,                 # Retry on failure
-        "concurrency_limit": 1,           # Max concurrent API calls (glm-4-flash limit: 2, use 1 for safety)
+        "concurrency_limit": 5,           # Max concurrent API calls (glm-4-flash limit: 2, use 1 for safety)
         "delay_between_batches": 2.0,     # Seconds to wait between batches
     },
     "summarization": {
@@ -32,7 +32,7 @@ LLM_CONFIG = {
 FETCH_CONFIG = {
     # Finnhub categories to fetch (will fetch from all listed categories)
     "finnhub_categories": ['general', 'merger'],
-    "polygon_limit": 200,          # Max articles from Polygon per fetch
+    "polygon_limit": 300,          # Max articles from Polygon per fetch
     "buffer_minutes": 1,           # Overlap window for incremental fetching (avoid gaps)
 }
 
