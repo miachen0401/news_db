@@ -156,7 +156,7 @@ async def lifespan(app: FastAPI):
     # Schedule fetch_incremental_llm_new.py every 1 hour
     scheduler.add_job(
         run_fetch_incremental,
-        trigger=IntervalTrigger(hours=1),
+        trigger=IntervalTrigger(minutes=10),
         id="fetch_incremental",
         name="Fetch Incremental News (every 1 hour)",
         replace_existing=True
