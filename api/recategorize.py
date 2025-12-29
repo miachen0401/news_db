@@ -98,7 +98,7 @@ async def main():
                 break
 
             total_processed += batch_stats['processed']
-            total_skipped += batch_stats['non_financial_skipped']
+            total_skipped += batch_stats['excluded_skipped']
             total_failed += batch_stats['failed']
 
             if batch_stats['categorized'] == 0:
@@ -171,7 +171,7 @@ async def main():
                     break
 
                 total_updated += recat_stats['updated']
-                total_non_financial += recat_stats['non_financial_removed']
+                total_non_financial += recat_stats['excluded_marked']
                 total_failed_recat += recat_stats['failed']
 
                 if recat_stats['recategorized'] == 0:

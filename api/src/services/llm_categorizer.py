@@ -104,9 +104,9 @@ RULES:
 
         news_text = ""
         for idx, item in enumerate(news_items, 1):
-            title = item.get('title', 'No title')
+            #title = item.get('title', 'No title')
             summary = item.get('summary', 'No summary')
-            news_text += f"\n[NEWS {idx}]\nTitle: {title}\nSummary: {summary}\n"
+            news_text += f"\n[NEWS {idx}]\nSummary: {summary}\n"
 
         prompt = f"""{categories_definition}
 
