@@ -14,10 +14,12 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 import os
+import asyncio
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse
 
 import logging
 
@@ -33,6 +35,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 from api.fetch_incremental_llm_new import main as fetch_main
 from api.generate_daily_summary import main as summary_main
 from api.recategorize import main as recategorize_main
+
+# Import for new GET endpoints
+from supabase import create_client
+from api.src.config import INCLUDED_CATEGORIES
+from api.src.db.daily_highlights import DailyHighlightDB
 
 # EST timezone
 EST = timezone(timedelta(hours=-5))
@@ -130,6 +137,11 @@ async def run_daily_summary():
 env_path = Path(__file__).parent / ".env"
 load_dotenv(env_path)
 
+# Initialize Supabase client for GET endpoints
+supabase_url = os.getenv("SUPABASE_NEWS_URL")
+supabase_key = os.getenv("SUPABASE_NEWS_KEY")
+supabase = create_client(supabase_url, supabase_key) if supabase_url and supabase_key else None
+
 # Initialize FastAPI app
 app = FastAPI(
     title="News Fetcher & Summarizer API",
@@ -152,6 +164,8 @@ async def root():
         "current_time_est": now_est.strftime("%Y-%m-%d %H:%M:%S EST"),
         "job_history": job_status,
         "endpoints": {
+            "get_company_news": "GET /news/company/{symbols}",
+            "get_daily_summary": "GET /summary/daily",
             "trigger_fetch": "POST /trigger/fetch",
             "trigger_recategorize": "POST /trigger/recategorize",
             "trigger_summary": "POST /trigger/summary",
@@ -180,6 +194,147 @@ async def get_status():
             "POST /trigger/all"
         ]
     }
+
+
+@app.get("/news/company/{symbols}")
+async def get_company_news(symbols: str, limit: int = 10):
+    """
+    Get 10 most recent news for specific company symbol(s).
+
+    Args:
+        symbols: Company symbol(s), comma-separated (e.g., "AAPL" or "AAPL,TSLA,NVDA")
+
+    Returns:
+        JSON with list of news articles (summary and published_at in EST)
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    # Parse symbols (comma-separated)
+    symbol_list = [s.strip().upper() for s in symbols.split(",")]
+
+    three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
+
+    try:
+        # Query database for news matching any of the symbols
+        # Filter by INCLUDED_CATEGORIES and get 10 most recent
+        def _fetch_news():
+            query = (
+                supabase
+                .table("stock_news")
+                .select("title, summary, published_at, symbol, category, source, url")
+                .in_("category", INCLUDED_CATEGORIES)
+                .gte("published_at", three_days_ago.isoformat())
+                .order("published_at", desc=True)
+                #.limit(100)  # Get more to filter by symbol
+            )
+            return query.execute()
+
+        result = await asyncio.to_thread(_fetch_news)
+        news_items = result.data or []
+
+        # Filter by symbol (check if any requested symbol appears in the news)
+        filtered_news = []
+        for item in news_items:
+            item_symbol = item.get("symbol", "")
+            # Check if any requested symbol is in the item's symbol field
+            # (symbol field might contain comma-separated symbols)
+            if any(symbol in item_symbol.upper() for symbol in symbol_list):
+                filtered_news.append(item)
+                if len(filtered_news) >= limit:
+                    break
+
+        # Convert published_at from UTC to EST
+        for item in filtered_news:
+            if item.get("published_at"):
+                utc_time = datetime.fromisoformat(item["published_at"].replace("Z", "+00:00"))
+                est_time = utc_time.astimezone(EST)
+                item["published_at"] = est_time.strftime("%Y-%m-%d %H:%M:%S EST")
+
+        return JSONResponse(content={
+            "symbols": symbol_list,
+            "count": len(filtered_news),
+            "news": filtered_news
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching company news: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/summary/daily")
+async def get_daily_summary():
+    """
+    Get current daily summary (8 AM or 6 PM based on current time).
+    If summary doesn't exist, generates it first.
+
+    Returns:
+        JSON with summary_date, summary_time, and summary text
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    try:
+        # Import determine_summary_target to find which summary we need
+        from api.generate_daily_summary import determine_summary_target
+
+        # Get current time in EST
+        now_est = datetime.now(timezone.utc).astimezone(EST)
+
+        # Determine which summary to check for
+        summary_date_est, summary_time_est, _, _ = determine_summary_target(now_est)
+
+        # Check if summary exists
+        highlights_db = DailyHighlightDB(client=supabase)
+        existing = await highlights_db.get_highlight(
+            summary_date=summary_date_est,
+            summary_time=summary_time_est
+        )
+
+        if existing:
+            # Summary exists, return it
+            return JSONResponse(content={
+                "status": "found",
+                "summary_date": existing.get("summary_date"),
+                "summary_time": existing.get("summary_time"),
+                "highlight_text": existing.get("highlight_text"),
+                "news_count": existing.get("news_count"),
+                "updated_at": existing.get("updated_at")
+            })
+
+        # Summary doesn't exist, generate it
+        logger.info(f"Daily summary not found for {summary_date_est} {summary_time_est}, generating...")
+
+        # Run generate_daily_summary
+        result = await summary_main()
+
+        # Try to fetch again after generation
+        existing = await highlights_db.get_highlight(
+            summary_date=summary_date_est,
+            summary_time=summary_time_est
+        )
+
+        if existing:
+            return JSONResponse(content={
+                "status": "generated",
+                "summary_date": existing.get("summary_date"),
+                "summary_time": existing.get("summary_time"),
+                "highlight_text": existing.get("highlight_text"),
+                "news_count": existing.get("news_count"),
+                "updated_at": existing.get("updated_at")
+            })
+        else:
+            # Still not found after generation
+            raise HTTPException(
+                status_code=500,
+                detail="Daily summary not found after running generate summary"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting daily summary: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/trigger/fetch")

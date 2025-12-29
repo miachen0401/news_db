@@ -41,6 +41,13 @@ curl -X POST $API_URL/trigger/all
 
 # Check status
 curl $API_URL/status
+
+# Request company news
+curl http://localhost:8000/news/company/AAPL
+curl "http://localhost:8000/news/company/AAPL,TSLA?limit=15"
+
+# Request daily summary
+curl http://localhost:8000/summary/daily
 ```
 
 ## 📊 Monitor Jobs
@@ -94,6 +101,3 @@ import requests; requests.post("http://localhost:8000/trigger/all")
 - Runs all three jobs in parallel
 - **Duration:** ~2-5 minutes total
 
----
-
-For detailed documentation, see: `docs/API_USAGE.md`
