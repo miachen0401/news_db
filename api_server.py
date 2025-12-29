@@ -1,4 +1,4 @@
-"""FastAPI server with scheduled news fetching and summarization."""
+"""FastAPI server for manual news job triggering."""
 # Add project root and api directory to path (must be first)
 import sys
 from pathlib import Path
@@ -13,17 +13,11 @@ if str(PROJECT_ROOT) not in sys.path:
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
-import asyncio
 import os
-from datetime import datetime, time as dt_time, timezone, timedelta
-from contextlib import asynccontextmanager
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
+from fastapi import FastAPI, BackgroundTasks
 
 import logging
 
@@ -42,9 +36,6 @@ from api.recategorize import main as recategorize_main
 
 # EST timezone
 EST = timezone(timedelta(hours=-5))
-
-# Global scheduler instance
-scheduler = None
 
 # Track job execution status
 job_status = {
@@ -120,12 +111,6 @@ async def run_daily_summary():
         logger.info("SCHEDULED: Starting daily summary generation")
         logger.info("=" * 70)
 
-        # Modify the summary script to use current time instead of hardcoded values
-        # We'll need to temporarily override the config
-        from api import generate_daily_summary
-        generate_daily_summary.SUMMARY_DATE = None  # Use today
-        generate_daily_summary.SUMMARY_TIME = None  # Use current time
-
         await summary_main()
 
         job_status[job_name]["last_run"] = datetime.now(timezone.utc)
@@ -141,76 +126,15 @@ async def run_daily_summary():
         job_status[job_name]["last_error"] = str(e)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Lifespan context manager to start/stop scheduler"""
-    global scheduler
-
-    # Load environment variables
-    env_path = Path(__file__).parent / ".env"
-    load_dotenv(env_path)
-
-    # Initialize scheduler
-    scheduler = AsyncIOScheduler(timezone='UTC')
-
-    # Schedule fetch_incremental_llm_new.py every 1 hour
-    scheduler.add_job(
-        run_fetch_incremental,
-        trigger=IntervalTrigger(minutes=10),
-        id="fetch_incremental",
-        name="Fetch Incremental News (every 1 hour)",
-        replace_existing=True
-    )
-    logger.info("Scheduled: Incremental fetch every 1 hour")
-
-    # Schedule recategorize_existing.py every 4 hours
-    scheduler.add_job(
-        run_recategorize_existing,
-        trigger=IntervalTrigger(hours=4),
-        id="recategorize_existing",
-        name="Re-categorize Existing News (every 4 hours)",
-        replace_existing=True
-    )
-    logger.info("Scheduled: Re-categorization every 4 hours")
-
-    # Schedule generate_daily_summary.py at 7 AM EST (12 PM UTC)
-    scheduler.add_job(
-        run_daily_summary,
-        trigger=CronTrigger(hour=12, minute=0, timezone='UTC'),  # 7 AM EST
-        id="daily_summary_morning",
-        name="Daily Summary (7 AM EST)",
-        replace_existing=True
-    )
-    logger.info("Scheduled: Daily summary at 7 AM EST (12 PM UTC)")
-
-    # Schedule generate_daily_summary.py at 5 PM EST (10 PM UTC)
-    scheduler.add_job(
-        run_daily_summary,
-        trigger=CronTrigger(hour=22, minute=0, timezone='UTC'),  # 5 PM EST
-        id="daily_summary_evening",
-        name="Daily Summary (5 PM EST)",
-        replace_existing=True
-    )
-    logger.info("Scheduled: Daily summary at 5 PM EST (10 PM UTC)")
-
-    # Start the scheduler
-    scheduler.start()
-    logger.info("Scheduler started successfully")
-
-    yield
-
-    # Shutdown scheduler
-    if scheduler:
-        scheduler.shutdown()
-        logger.info("Scheduler shut down")
-
+# Load environment variables on startup
+env_path = Path(__file__).parent / ".env"
+load_dotenv(env_path)
 
 # Initialize FastAPI app
 app = FastAPI(
     title="News Fetcher & Summarizer API",
-    description="Automated news fetching and summarization service",
-    version="1.0.0",
-    lifespan=lifespan
+    description="Manual trigger API for news fetching and summarization",
+    version="1.0.0"
 )
 
 
@@ -223,10 +147,16 @@ async def root():
     return {
         "status": "running",
         "service": "News Fetcher & Summarizer API",
+        "mode": "manual_trigger",
         "current_time_utc": now_utc.isoformat(),
         "current_time_est": now_est.strftime("%Y-%m-%d %H:%M:%S EST"),
-        "scheduler_running": scheduler.running if scheduler else False,
-        "jobs": job_status
+        "job_history": job_status,
+        "endpoints": {
+            "trigger_fetch": "POST /trigger/fetch",
+            "trigger_recategorize": "POST /trigger/recategorize",
+            "trigger_summary": "POST /trigger/summary",
+            "trigger_all": "POST /trigger/all"
+        }
     }
 
 
@@ -238,23 +168,17 @@ async def health():
 
 @app.get("/status")
 async def get_status():
-    """Get scheduler and job status"""
-    jobs_info = []
-
-    if scheduler:
-        for job in scheduler.get_jobs():
-            next_run = job.next_run_time
-            jobs_info.append({
-                "id": job.id,
-                "name": job.name,
-                "next_run_utc": next_run.isoformat() if next_run else None,
-                "next_run_est": next_run.astimezone(EST).strftime("%Y-%m-%d %H:%M:%S EST") if next_run else None
-            })
-
+    """Get job execution history"""
     return {
-        "scheduler_running": scheduler.running if scheduler else False,
-        "scheduled_jobs": jobs_info,
-        "job_history": job_status
+        "mode": "manual_trigger",
+        "message": "Jobs are triggered via POST endpoints, not scheduled",
+        "job_history": job_status,
+        "available_triggers": [
+            "POST /trigger/fetch",
+            "POST /trigger/recategorize",
+            "POST /trigger/summary",
+            "POST /trigger/all"
+        ]
     }
 
 

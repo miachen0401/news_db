@@ -55,7 +55,6 @@ COMPANY_NEWS_CONFIG = {
 
 # Categories to include in daily summaries and analysis (whitelist approach)
 INCLUDED_CATEGORIES = [
-    "MACRO_ECONOMY",        # Macroeconomic indicators and official data
     "CENTRAL_BANK_POLICY",  # Interest rates, monetary policy decisions
     "GEOPOLITICAL_EVENT",   # Geopolitical news with named governments/leaders
     "INDUSTRY_REGULATION",  # Regulatory/policy actions on specific industries
@@ -65,9 +64,12 @@ INCLUDED_CATEGORIES = [
     "PRODUCT_TECH_UPDATE",  # Product launches, R&D, technology updates
     "BUSINESS_OPERATIONS",  # Supply chain, contracts, partnerships, expansions
     "INCIDENT_LEGAL",       # Lawsuits, investigations, accidents, breaches
-    "ANALYST_OPINION",      # Analyst rating changes, price targets
-    "MARKET_SENTIMENT",     # Investor sentiment, flows, surveys
 ]
+
+# Categories stay in the news database, but not in the daily summary
+#    "MACRO_ECONOMY",        # Macroeconomic indicators and official data
+#    "ANALYST_OPINION",      # Analyst rating changes, price targets
+#    "MARKET_SENTIMENT",     # Investor sentiment, flows, surveys
 
 # Categories excluded from summaries (automatically derived from above)
 # MACRO_NOBODY - Geopolitical commentary without specific leaders

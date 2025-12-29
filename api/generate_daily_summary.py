@@ -8,7 +8,7 @@ if _api_dir not in sys.path:
 
 import asyncio
 import os
-from datetime import datetime, time, timedelta, timezone
+from datetime import datetime, date, time, timedelta, timezone
 from dotenv import load_dotenv
 from supabase import create_client
 
@@ -31,11 +31,55 @@ UTC = timezone.utc
 # Log directory for caching summaries
 LOG_DIR = Path(__file__).parent / ".log"
 
-# ============================================
-# CONFIGURATION: Change these as needed
-# ============================================
-SUMMARY_DATE = "2025-12-03"  # None = today, or specify date like "2025-11-23"
-SUMMARY_TIME = "18:00:00"  # None = now, or specify time like "17:00:00"
+
+def determine_summary_target(now_est: datetime) -> tuple[date, time, datetime, datetime]:
+    """
+    Determine which summary should be generated based on current time.
+
+    Two summary points per day (EST):
+    - 8 AM: Covers yesterday 6 PM to today 8 AM
+    - 6 PM: Covers today 8 AM to today 6 PM
+
+    Logic:
+    - If current time is 9 AM - 5:59 PM: Generate/check 8 AM summary for today
+    - If current time is 6 PM - 8:59 AM: Generate/check 6 PM summary
+      - 6 PM - 11:59 PM: Today's 6 PM summary
+      - 12 AM - 8:59 AM: Yesterday's 6 PM summary
+
+    Args:
+        now_est: Current time in EST timezone
+
+    Returns:
+        Tuple of (summary_date, summary_time, from_time_est, to_time_est)
+    """
+    current_hour = now_est.hour
+
+    # Determine which summary to generate
+    if 9 <= current_hour <= 17:  # 9 AM to 5:59 PM
+        # Generate 8 AM summary for today
+        summary_date_est = now_est.date()
+        summary_time_est = time(8, 0, 0)
+        # News window: yesterday 6 PM to today 8 AM
+        from_time_est = datetime.combine(summary_date_est - timedelta(days=1), time(18, 0, 0))
+        to_time_est = datetime.combine(summary_date_est, time(8, 0, 0))
+
+    elif 18 <= current_hour <= 23:  # 6 PM to 11:59 PM
+        # Generate 6 PM summary for today
+        summary_date_est = now_est.date()
+        summary_time_est = time(18, 0, 0)
+        # News window: today 8 AM to today 6 PM
+        from_time_est = datetime.combine(summary_date_est, time(8, 0, 0))
+        to_time_est = datetime.combine(summary_date_est, time(18, 0, 0))
+
+    else:  # 0-8 (12 AM to 8:59 AM)
+        # Generate 6 PM summary for yesterday
+        summary_date_est = (now_est - timedelta(days=1)).date()
+        summary_time_est = time(18, 0, 0)
+        # News window: yesterday 8 AM to yesterday 6 PM
+        from_time_est = datetime.combine(summary_date_est, time(8, 0, 0))
+        to_time_est = datetime.combine(summary_date_est, time(18, 0, 0))
+
+    return summary_date_est, summary_time_est, from_time_est, to_time_est
 
 
 async def main():
@@ -46,6 +90,7 @@ async def main():
     now_est = datetime.now(UTC).astimezone(EST)
     logger.info(f"Run time: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
     logger.debug("")
+
     # Load environment
     env_path = Path(__file__).parent / ".env"
     load_dotenv(env_path)
@@ -61,37 +106,69 @@ async def main():
 
     logger.info("Configuration loaded")
     logger.debug("")
+
     # Initialize clients
     supabase = create_client(supabase_url, supabase_key)
     summarizer = DailySummarizer(api_key=zhipu_api_key)
     highlights_db = DailyHighlightDB(client=supabase)
 
     # ========================================
-    # Convert EST input to UTC (all processing uses UTC)
+    # Determine which summary to generate based on current time
     # ========================================
-    if SUMMARY_DATE:
-        summary_date_est = datetime.strptime(SUMMARY_DATE, "%Y-%m-%d").date()
-    else:
-        summary_date_est = datetime.now(UTC).astimezone(EST).date()
+    summary_date_est, summary_time_est, from_time_est, to_time_est = determine_summary_target(now_est)
 
-    if SUMMARY_TIME:
-        summary_time_est = datetime.strptime(SUMMARY_TIME, "%H:%M:%S").time()
-    else:
-        summary_time_est = datetime.now(UTC).astimezone(EST).time()
-
-    # Convert EST to UTC for all processing
-    # From: 6PM EST the day before
-    from_date_est = summary_date_est - timedelta(days=1)
-    from_time_est = datetime.combine(from_date_est, time(18, 0, 0))
-    from_time = from_time_est.replace(tzinfo=EST).astimezone(UTC).replace(tzinfo=None)
-
-    # To: summary_time EST on summary_date
-    to_time_est = datetime.combine(summary_date_est, summary_time_est)
-    to_time = to_time_est.replace(tzinfo=EST).astimezone(UTC).replace(tzinfo=None)
-
-    logger.debug(f"📅 Summary for: {summary_date_est} {summary_time_est} EST")
-    logger.debug(f"📰 News window: {from_time_est.strftime('%m/%d %H:%M')} - {to_time_est.strftime('%m/%d %H:%M')} EST")
+    logger.info(f"Target Summary: {summary_date_est} {summary_time_est} EST")
+    logger.info(f"News Window: {from_time_est.strftime('%m/%d %H:%M')} - {to_time_est.strftime('%m/%d %H:%M')} EST")
     logger.debug("")
+
+    # ========================================
+    # Check if summary already exists
+    # ========================================
+    logger.debug("-" * 70)
+    logger.info("Checking for Existing Summary")
+    logger.debug("-" * 70)
+
+    existing = await highlights_db.get_highlight(
+        summary_date=summary_date_est,
+        summary_time=summary_time_est
+    )
+
+    if existing:
+        logger.info(f"✓ Summary already exists for {summary_date_est} {summary_time_est} EST")
+        logger.info(f"   News count: {existing.get('news_count', 0)}")
+        logger.info(f"   Summary length: {len(existing.get('highlight_text', ''))} characters")
+        logger.info(f"   Last updated: {existing.get('updated_at', 'N/A')}")
+        logger.debug("")
+
+        # Display existing summary
+        highlight_text = existing.get('highlight_text', '')
+        logger.debug("=" * 70)
+        logger.debug("Existing Summary (Preview):")
+        logger.debug("=" * 70)
+        preview = highlight_text[:500] + "..." if len(highlight_text) > 500 else highlight_text
+        logger.debug(preview)
+        logger.debug("=" * 70)
+        logger.debug("")
+
+        logger.info("=" * 70)
+        logger.info("SUMMARY RETRIEVAL COMPLETE")
+        logger.info("=" * 70)
+        logger.info(f"Status: Existing summary returned")
+        logger.info(f"Date: {summary_date_est} (EST)")
+        logger.info(f"Time: {summary_time_est} (EST)")
+        logger.debug("")
+
+        await summarizer.close()
+        return existing
+
+    logger.info(f"No existing summary found - will generate new one")
+    logger.debug("")
+
+    # ========================================
+    # Convert EST to UTC for database queries
+    # ========================================
+    from_time = from_time_est.replace(tzinfo=EST).astimezone(UTC).replace(tzinfo=None)
+    to_time = to_time_est.replace(tzinfo=EST).astimezone(UTC).replace(tzinfo=None)
     # ========================================
     # STEP 1: Fetch news from database (using UTC)
     # ========================================
@@ -236,11 +313,20 @@ async def main():
     logger.info("=" * 70)
     logger.info("DAILY SUMMARY COMPLETE")
     logger.info("=" * 70)
+    logger.info(f"Status: New summary generated")
     logger.info(f"Date: {summary_date_est} (EST)")
     logger.info(f"Time: {summary_time_est} (EST)")
     logger.info(f"News Count: {len(news_items)}")
     logger.info(f"Summary Length: {len(highlight_text)} characters")
     logger.info(f"Log File: {log_path}")
     logger.debug("")
+
+    return {
+        "summary_date": summary_date_est.isoformat(),
+        "summary_time": summary_time_est.isoformat(),
+        "highlight_text": highlight_text,
+        "news_count": len(news_items),
+        "status": "generated"
+    }
 if __name__ == "__main__":
     asyncio.run(main())
