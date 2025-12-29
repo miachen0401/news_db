@@ -6,7 +6,7 @@ from src.models.raw_news import RawNewsItem, ProcessingStatus
 from src.storage.raw_news_storage import RawNewsStorage
 from src.db.stock_news import StockNewsDB
 from src.services.llm_categorizer import NewsCategorizer
-from src.config import LLM_CONFIG
+from src.config import LLM_CONFIG, EXCLUDED_CATEGORIES
 import logging
 logger = logging.getLogger(__name__)
 
@@ -182,13 +182,14 @@ class LLMNewsProcessor:
                 )
                 return False
 
-            # Filter out NON_FINANCIAL news
-            if processed_data.get("category") == "NON_FINANCIAL":
+            # Filter out excluded categories (NON_FINANCIAL, MACRO_NOBODY, etc.)
+            if processed_data.get("category") in EXCLUDED_CATEGORIES:
                 await self.raw_storage.update_processing_status(
                     item_id,
                     ProcessingStatus.COMPLETED
                 )
-                logger.debug(f"Skipped NON_FINANCIAL: {processed_data['title'][:50]}...")
+                category = processed_data.get("category")
+                logger.debug(f"Skipped {category}: {processed_data['title'][:50]}...")
                 return True  # Mark as successful but don't store
 
             # Handle ERROR category - store with error_log
@@ -241,7 +242,7 @@ class LLMNewsProcessor:
             "fetched": 0,
             "categorized": 0,
             "processed": 0,
-            "non_financial_skipped": 0,
+            "excluded_skipped": 0,
             "failed": 0
         }
 
@@ -281,8 +282,8 @@ class LLMNewsProcessor:
                 success = await self.process_raw_item(raw_item, item_data)
 
                 if success:
-                    if item_data.get("primary_category") == "NON_FINANCIAL":
-                        stats["non_financial_skipped"] += 1
+                    if item_data.get("primary_category") in EXCLUDED_CATEGORIES:
+                        stats["excluded_skipped"] += 1
                     else:
                         stats["processed"] += 1
                 else:
@@ -291,7 +292,7 @@ class LLMNewsProcessor:
         logger.info(f"Processing complete:")
         logger.info(f"   Categorized: {stats['categorized']}")
         logger.info(f"   Stored: {stats['processed']}")
-        logger.info(f"   NON_FINANCIAL skipped: {stats['non_financial_skipped']}")
+        logger.info(f"   Excluded skipped: {stats['excluded_skipped']}")
         logger.info(f"   Failed: {stats['failed']}")
         return stats
 
@@ -300,7 +301,7 @@ class LLMNewsProcessor:
         Pre-filter items with "nobody" in category name.
 
         Categories containing "nobody" are too generic/non-specific.
-        Mark them as NON_FINANCIAL directly without LLM calls.
+        Mark them as MACRO_NOBODY directly without LLM calls.
 
         Returns:
             Number of items filtered
@@ -319,16 +320,16 @@ class LLMNewsProcessor:
 
             # Check if category contains "nobody" (case-insensitive)
             if "nobody" in category.lower():
-                # Mark as NON_FINANCIAL directly
+                # Mark as MACRO_NOBODY directly
                 success = await self.stock_news_db.update_category(
                     item_id=item_id,
-                    category="NON_FINANCIAL",
+                    category="MACRO_NOBODY",
                     secondary_category="",
                     error_log=f"Auto-filtered: category contained 'nobody' ({category})"
                 )
                 if success:
                     nobody_filtered += 1
-                    logger.debug(f"Filtered [{category}→NON_FINANCIAL] {item.get('title', '')[:50]}...")
+                    logger.debug(f"Filtered [{category}→MACRO_NOBODY] {item.get('title', '')[:50]}...")
 
         return nobody_filtered
 
@@ -380,11 +381,11 @@ class LLMNewsProcessor:
 
         This unified method handles all items with problematic categories:
         - UNCATEGORIZED: Failed initial categorization
-        - Invalid categories: Not in INCLUDED_CATEGORIES (LLM hallucinations, typos, old schema)
+        - Invalid categories: Not in ALLOWED_CATEGORIES (LLM hallucinations, typos, old schema)
 
         Excludes:
         - ERROR: Permanent failures (don't retry)
-        - NON_FINANCIAL: Correctly categorized
+        - All valid categories from ALLOWED_CATEGORIES
 
         Args:
             limit: Maximum number of items to re-process
@@ -396,7 +397,7 @@ class LLMNewsProcessor:
             "fetched": 0,
             "recategorized": 0,
             "updated": 0,
-            "non_financial_removed": 0,
+            "excluded_marked": 0,
             "failed": 0
         }
 
@@ -481,10 +482,10 @@ class LLMNewsProcessor:
                         logger.debug(f"Changed to UNCATEGORIZED (was {old_category}): {stock_item.get('title', '')[:50]}...")
                     continue
 
-                # If NON_FINANCIAL, update category
-                if new_category == "NON_FINANCIAL":
-                    stats["non_financial_removed"] += 1
-                    logger.debug(f"Marked as NON_FINANCIAL (was {old_category}): {stock_item.get('title', '')[:50]}...")
+                # If excluded category, count it
+                if new_category in EXCLUDED_CATEGORIES:
+                    stats["excluded_marked"] += 1
+                    logger.debug(f"Marked as {new_category} (was {old_category}): {stock_item.get('title', '')[:50]}...")
 
                 # Update category (clear error_log if previously had error)
                 success = await self.stock_news_db.update_category(
@@ -506,6 +507,6 @@ class LLMNewsProcessor:
         logger.info(f"Re-categorization complete:")
         logger.info(f"   Re-categorized: {stats['recategorized']}")
         logger.info(f"   Updated: {stats['updated']}")
-        logger.info(f"   NON_FINANCIAL marked: {stats['non_financial_removed']}")
+        logger.info(f"   Excluded marked: {stats['excluded_marked']}")
         logger.info(f"   Failed: {stats['failed']}")
         return stats

@@ -5,7 +5,7 @@ from supabase import Client
 import asyncio
 import logging
 
-from src.config import INCLUDED_CATEGORIES
+from src.config import ALLOWED_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -96,18 +96,18 @@ class StockNewsDB:
 
         Items needing re-categorization include:
         - UNCATEGORIZED: Failed initial categorization
-        - Invalid categories: Not in INCLUDED_CATEGORIES list (LLM hallucinations, typos)
+        - Invalid categories: Not in ALLOWED_CATEGORIES list (LLM hallucinations, typos)
 
         Excludes:
         - ERROR: Permanent failures (don't retry)
-        - NON_FINANCIAL: Correctly categorized as non-market news
+        - All valid categories in ALLOWED_CATEGORIES (including those not used in daily summary)
 
         Returns:
             Number of items needing re-categorization
         """
         # Valid categories that DON'T need re-categorization
-        # = INCLUDED_CATEGORIES + categories we explicitly don't want to retry
-        CATEGORIES_TO_SKIP = INCLUDED_CATEGORIES + ["ERROR", "NON_FINANCIAL"]
+        # = ALLOWED_CATEGORIES (all valid categories) + ERROR (permanent failures)
+        CATEGORIES_TO_SKIP = ALLOWED_CATEGORIES + ["ERROR"]
 
         try:
             def _count():
@@ -135,12 +135,11 @@ class StockNewsDB:
 
         Items returned include:
         - UNCATEGORIZED: Failed initial categorization, need retry
-        - Invalid categories: Categories not in INCLUDED_CATEGORIES (hallucinations, typos, old schema)
+        - Invalid categories: Categories not in ALLOWED_CATEGORIES (hallucinations, typos, old schema)
 
         Excludes:
         - ERROR: Permanent failures (don't retry to avoid infinite loops)
-        - NON_FINANCIAL: Correctly categorized as non-market news
-        - All valid financial categories from INCLUDED_CATEGORIES
+        - All valid categories from ALLOWED_CATEGORIES (including those not used in daily summary)
 
         Args:
             limit: Maximum number of items to fetch
@@ -149,7 +148,7 @@ class StockNewsDB:
             List of news items needing re-categorization, ordered by created_at (oldest first)
         """
         # Valid categories that DON'T need re-categorization
-        CATEGORIES_TO_SKIP = INCLUDED_CATEGORIES + ["ERROR", "NON_FINANCIAL"]
+        CATEGORIES_TO_SKIP = ALLOWED_CATEGORIES + ["ERROR"]
 
         try:
             def _fetch():

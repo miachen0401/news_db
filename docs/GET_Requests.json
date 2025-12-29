@@ -1,5 +1,5 @@
 # Get company news
-# curl "http://localhost:8000/news/company/TSLA?limit=15"
+# curl "https://news-db-1pgr.onrender.com/news/company/TSLA?limit=15"
 {"symbols":["TSLA"],
     "count":2,
     "news":[{"title":"From pandemic to AI boom: The new reality of global supply chains",
@@ -12,7 +12,7 @@
 
 
 # Request daily summary
-# curl http://localhost:8000/summary/daily
+# curl https://news-db-1pgr.onrender.com/summary/daily
 {"status":"found",
     "summary_date":"2025-12-28",
     "summary_time":"18:00:00",

@@ -53,6 +53,23 @@ COMPANY_NEWS_CONFIG = {
     "buffer_minutes": 1,           # Overlap window for incremental fetching
 }
 
+ALLOWED_CATEGORIES = [
+    "CENTRAL_BANK_POLICY",  # Interest rates, monetary policy decisions
+    "GEOPOLITICAL_EVENT",   # Geopolitical news with named governments/leaders
+    "INDUSTRY_REGULATION",  # Regulatory/policy actions on specific industries
+    "CORPORATE_EARNINGS",   # Earnings, guidance, financial statements
+    "CORPORATE_ACTIONS",    # M&A, buybacks, splits, spinoffs, bankruptcies
+    "MANAGEMENT_CHANGE",    # CEO/CFO/board-level leadership changes
+    "PRODUCT_TECH_UPDATE",  # Product launches, R&D, technology updates
+    "BUSINESS_OPERATIONS",  # Supply chain, contracts, partnerships, expansions
+    "INCIDENT_LEGAL",       # Lawsuits, investigations, accidents, breaches
+    "MACRO_NOBODY",
+    "MACRO_ECONOMY",
+    "ANALYST_OPINION",
+    "NON_FINANCIAL",
+    "MARKET_SENTIMENT",
+]
+
 # Categories to include in daily summaries and analysis (whitelist approach)
 INCLUDED_CATEGORIES = [
     "CENTRAL_BANK_POLICY",  # Interest rates, monetary policy decisions
@@ -71,11 +88,18 @@ INCLUDED_CATEGORIES = [
 #    "ANALYST_OPINION",      # Analyst rating changes, price targets
 #    "MARKET_SENTIMENT",     # Investor sentiment, flows, surveys
 
-# Categories excluded from summaries (automatically derived from above)
-# MACRO_NOBODY - Geopolitical commentary without specific leaders
-# UNCATEGORIZED - Failed categorization (will be retried)
-# ERROR - Permanent categorization errors (won't retry)
+# Categories that should be filtered out/removed from stock_news table
+# These are invalid or unwanted categories that should be excluded from all operations
+# MACRO_NOBODY - Geopolitical commentary without specific leaders (too generic)
 # NON_FINANCIAL - Non-market news (filtered during processing)
+# UNCATEGORIZED - Failed categorization (will be retried, not truly excluded)
+# ERROR - Permanent categorization errors (won't retry)
+EXCLUDED_CATEGORIES = [
+    "MACRO_NOBODY",
+    "NON_FINANCIAL",
+    "ANALYST_OPINION",
+]
+
 
 # Action Priority Configuration (for distributed processing)
 # Lower number = higher priority (processed first)
