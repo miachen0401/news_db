@@ -3,8 +3,9 @@ from typing import Dict, List, Optional, Any
 import httpx
 import json
 import asyncio
+import time
 
-from src.config import LLM_CONFIG, LLM_MODELS
+from src.config import LLM_MODELS
 import logging
 logger = logging.getLogger(__name__)
 
@@ -52,17 +53,29 @@ class NewsCategorizer:
 
         # Use model config from LLM_MODELS
         self.model_config = LLM_MODELS['categorization']
-        self.model = self.model_config['model']
+        self.primary_model = self.model_config['model']
+        self.fallback_model = self.model_config.get('fallback_model', 'glm-4-flash')
+        self.model = self.primary_model  # Start with primary model
         self.temperature = self.model_config['temperature']
         self.timeout = self.model_config['timeout']
         self.max_retries = self.model_config['max_retries']
         self.delay_between_batches = self.model_config['delay_between_batches']
 
+        # Track if we've fallen back to the fallback model
+        self.using_fallback = False
+
         # Concurrency control: limit concurrent API calls
         self.concurrency_limit = self.model_config['concurrency_limit']
         self.semaphore = asyncio.Semaphore(self.concurrency_limit)
 
-        self.client = httpx.AsyncClient(timeout=self.timeout)
+        # Configure timeout for httpx client
+        timeout_config = httpx.Timeout(
+            connect=10.0,
+            read=self.timeout,
+            write=10.0,
+            pool=5.0
+        )
+        self.client = httpx.AsyncClient(timeout=timeout_config)
 
     def _build_categorization_prompt(self, news_items: List[Dict[str, Any]]) -> str:
         """
@@ -104,9 +117,12 @@ RULES:
 
         news_text = ""
         for idx, item in enumerate(news_items, 1):
-            #title = item.get('title', 'No title')
+            title = item.get('title', 'No title')
             summary = item.get('summary', 'No summary')
-            news_text += f"\n[NEWS {idx}]\nSummary: {summary}\n"
+            # Truncate title and summary to avoid excessive prompt length
+            title = title[:150] if title else 'No title'
+            summary = summary[:400] if summary else 'No summary'
+            news_text += f"\n[NEWS {idx}]\nTitle: {title}\nSummary: {summary}\n"
 
         prompt = f"""{categories_definition}
 
@@ -130,6 +146,13 @@ Output only the JSON array, no additional text."""
 
         return prompt
 
+    def _switch_to_fallback(self):
+        """Switch to fallback model if not already using it."""
+        if not self.using_fallback and self.fallback_model:
+            logger.info(f"Switching from {self.model} to fallback model {self.fallback_model}")
+            self.model = self.fallback_model
+            self.using_fallback = True
+
     async def _call_llm_api(self, prompt: str, retry_count: int = 0) -> tuple[Optional[str], Optional[str]]:
         """
         Call LLM API with retry logic and concurrency control.
@@ -143,8 +166,9 @@ Output only the JSON array, no additional text."""
             - content: LLM response content or None if failed
             - error_message: Error details if failed, None if successful
         """
-        async with self.semaphore:  # Limit concurrent API calls
+        async with self.semaphore:
             try:
+                logger.debug(f"API call with {self.model} (attempt {retry_count + 1}/{self.max_retries + 1})")
                 response = await self.client.post(
                     self.base_url,
                     headers={
@@ -153,12 +177,7 @@ Output only the JSON array, no additional text."""
                     },
                     json={
                         "model": self.model,
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": prompt
-                            }
-                        ],
+                        "messages": [{"role": "user", "content": prompt}],
                         "temperature": self.temperature,
                     }
                 )
@@ -169,28 +188,43 @@ Output only the JSON array, no additional text."""
                     return (content, None)
 
                 elif response.status_code == 429 and retry_count < self.max_retries:
-                    # Rate limit exceeded, wait and retry
-                    wait_time = (retry_count + 1) * 5  # Exponential backoff: 5s, 10s, 15s
-                    logger.debug(f"Rate limit hit (429), retrying in {wait_time}s... (attempt {retry_count + 1}/{self.max_retries})")
+                    wait_time = (retry_count + 1) * 5
+                    logger.debug(f"Rate limit (429), retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     return await self._call_llm_api(prompt, retry_count + 1)
 
                 else:
-                    # Permanent error - return error details
                     error_msg = f"API Error {response.status_code}: {response.text[:200]}"
-                    logger.debug(f"Zhipu API error: {response.status_code}")
-                    logger.debug(f"Response: {response.text}")
+                    logger.debug(f"API error: {response.status_code}")
+                    return (None, error_msg)
+
+            except httpx.TimeoutException as e:
+                # On timeout, switch to fallback model if using primary
+                if not self.using_fallback and retry_count == 0:
+                    logger.warning(f"Model {self.model} timed out, switching to fallback")
+                    self._switch_to_fallback()
+                    return await self._call_llm_api(prompt, retry_count)
+
+                # If already using fallback or retrying, continue with retries
+                if retry_count < self.max_retries:
+                    wait_time = (retry_count + 1) * 3
+                    logger.debug(f"Timeout, retrying in {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+                    return await self._call_llm_api(prompt, retry_count + 1)
+                else:
+                    error_msg = f"Timeout after {self.max_retries + 1} attempts"
+                    logger.error(error_msg)
                     return (None, error_msg)
 
             except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
                 if retry_count < self.max_retries:
                     wait_time = (retry_count + 1) * 3
-                    logger.debug(f"API call failed: {e}, retrying in {wait_time}s...")
+                    logger.debug(f"Error: {error_msg}, retrying in {wait_time}s...")
                     await asyncio.sleep(wait_time)
                     return await self._call_llm_api(prompt, retry_count + 1)
                 else:
-                    error_msg = f"Exception after {self.max_retries} retries: {str(e)}"
-                    logger.debug(f"Error calling LLM API after {self.max_retries} retries: {e}")
+                    logger.error(f"API failed after {self.max_retries + 1} attempts: {error_msg}")
                     return (None, error_msg)
 
     async def categorize_batch(
@@ -211,18 +245,23 @@ Output only the JSON array, no additional text."""
         if not news_items:
             return []
 
-        # Process in batches
         all_results = []
+        num_batches = (len(news_items) + batch_size - 1) // batch_size
+        logger.debug(f"Processing {len(news_items)} items in {num_batches} batches")
 
         for i in range(0, len(news_items), batch_size):
             batch = news_items[i:i + batch_size]
+            batch_num = i//batch_size + 1
 
-            logger.debug(f"Categorizing batch {i//batch_size + 1} ({len(batch)} items)...")
             try:
+                start_time = time.time()
                 prompt = self._build_categorization_prompt(batch)
 
-                # Call LLM API with retry and concurrency control
+                # Call LLM API (with automatic fallback on timeout)
                 content, error_msg = await self._call_llm_api(prompt)
+
+                api_time = time.time() - start_time
+                logger.debug(f"Batch {batch_num}/{num_batches} took {api_time:.1f}s")
 
                 if content:
                     # Parse JSON response
@@ -249,7 +288,7 @@ Output only the JSON array, no additional text."""
                                     'api_error': None  # No error
                                 })
 
-                        logger.debug(f"Categorized {len(results)} items")
+                        logger.debug(f"Categorized {len(results)} items from batch {batch_num}")
                     except json.JSONDecodeError as e:
                         logger.debug(f"Failed to parse LLM response: {e}")
                         logger.debug(f"Response: {content[:200]}")
