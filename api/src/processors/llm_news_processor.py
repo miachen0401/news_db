@@ -211,10 +211,12 @@ class LLMNewsProcessor:
                 logger.debug(f"Stored [{cat}] {processed_data['title'][:45]}... ({sec_cat or 'general'})")
                 return True
             else:
+                error_msg = f"Failed to insert into stock_news (URL: {processed_data.get('url', '')[:50]})"
+                logger.warning(f"Insert failed for item {item_id}: {processed_data.get('title', '')[:50]}")
                 await self.raw_storage.update_processing_status(
                     item_id,
                     ProcessingStatus.FAILED,
-                    error_log="Failed to insert into stock_news"
+                    error_log=error_msg
                 )
                 return False
 

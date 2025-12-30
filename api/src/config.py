@@ -6,8 +6,8 @@ logger = logging.getLogger(__name__)
 # LLM Model Configuration
 LLM_MODELS = {
     "categorization": {
-        "model": "glm-4.5-flash",         # Zhipu AI model for categorization (falls back to glm-4-flash on timeout)
-        "fallback_model": "glm-4-flash",  # Fallback model if primary times out
+        "model": "glm-4-flash",           # Zhipu AI model for categorization (reliable, use glm-4.5-flash in fallback for testing)
+        "fallback_model": "glm-4.5-flash",  # Fallback to newer model if primary fails (swapped for reliability)
         "temperature": 0.3,               # Lower = more consistent
         "timeout": 60.0,                  # Request timeout in seconds
         "max_retries": 2,                 # Retry on failure

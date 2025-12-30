@@ -83,11 +83,14 @@ class StockNewsDB:
 
             if result.data:
                 return result.data[0]
-
-            return None
+            else:
+                logger.error(f"Insert failed but no exception: {url[:50] if url else 'no url'}")
+                return None
 
         except Exception as e:
-            logger.debug(f"Error inserting news: {e}")
+            logger.error(f"Error inserting news into stock_news: {type(e).__name__}: {str(e)}")
+            logger.error(f"  URL: {url[:80] if url else 'no url'}")
+            logger.error(f"  Category: {news_data.get('category')}")
             return None
 
     async def count_items_needing_recategorization(self) -> int:

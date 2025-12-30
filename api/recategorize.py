@@ -71,8 +71,32 @@ async def main():
     )
 
     # ========================================
+    # STEP 0: Retry Failed Raw News
+    # Priority: 0 (Highest - retry failed items)
+    # ========================================
+    logger.debug("-" * 70)
+    logger.info("STEP 0: Retry Failed Raw News (Priority 0)")
+    logger.debug("-" * 70)
+
+    # Get detailed stats for debugging
+    raw_stats_initial = await raw_storage.get_stats()
+    logger.info(f"Initial raw storage stats:")
+    logger.info(f"   Total: {raw_stats_initial['total']}")
+    logger.info(f"   Pending: {raw_stats_initial['pending']}")
+    logger.info(f"   Completed: {raw_stats_initial['completed']}")
+    logger.info(f"   Failed: {raw_stats_initial['failed']}")
+    logger.debug("")
+
+    failed_count = raw_stats_initial['failed']
+    if failed_count > 0:
+        logger.info(f"Resetting {min(failed_count, LLM_CONFIG['processing_limit'])} failed items to pending...")
+        reset_count = await raw_storage.reset_failed_to_pending(limit=failed_count)
+        logger.info(f"Reset {reset_count} failed items to pending for retry")
+        logger.debug("")
+
+    # ========================================
     # STEP 1: Process Pending Raw News
-    # Priority: 1 (Highest - process_pending_raw)
+    # Priority: 1 (High - process_pending_raw)
     # ========================================
     logger.debug("-" * 70)
     logger.info("STEP 1: Process Pending Raw News (Priority 1)")
@@ -197,9 +221,15 @@ async def main():
     # Cleanup
     await categorizer.close()
 
+    # Final statistics
+    final_failed = await raw_storage.count_failed()
+    final_pending = await raw_storage.count_pending()
+
     logger.info("=" * 70)
     logger.info("RE-CATEGORIZATION COMPLETE")
     logger.info("=" * 70)
+    logger.info(f"Remaining failed items: {final_failed}")
+    logger.info(f"Remaining pending items: {final_pending}")
     logger.debug("")
 
 

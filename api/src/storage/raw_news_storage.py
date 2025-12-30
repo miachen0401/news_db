@@ -134,9 +134,33 @@ class RawNewsStorage:
             logger.debug(f"Error counting pending news: {e}")
             return 0
 
+    async def count_failed(self) -> int:
+        """
+        Count failed raw news items.
+
+        Returns:
+            Number of failed items
+        """
+        try:
+            def _count():
+                return (
+                    self.client
+                    .table(self.table_name)
+                    .select("id", count="exact")
+                    .eq("processing_status", ProcessingStatus.FAILED.value)
+                    .execute()
+                )
+
+            result = await asyncio.to_thread(_count)
+            return result.count or 0
+
+        except Exception as e:
+            logger.debug(f"Error counting failed news: {e}")
+            return 0
+
     async def get_unprocessed(self, limit: int = 100) -> List[Dict[str, Any]]:
         """
-        Get unprocessed raw news items.
+        Get unprocessed raw news items (pending status only).
 
         Args:
             limit: Maximum number of items to fetch
@@ -150,9 +174,39 @@ class RawNewsStorage:
                     self.client
                     .table(self.table_name)
                     .select("*")
-                    .eq("is_processed", False)
+                    # Don't filter by is_processed - only filter by status
                     .eq("processing_status", ProcessingStatus.PENDING.value)
                     .order("created_at", desc=False)  # Process oldest first
+                    .limit(limit)
+                    .execute()
+                )
+
+            result = await asyncio.to_thread(_fetch)
+            logger.debug(f"get_unprocessed found {len(result.data or [])} pending items")
+            return result.data or []
+
+        except Exception as e:
+            logger.error(f"Error getting unprocessed news: {e}")
+            return []
+
+    async def get_failed(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get failed raw news items for retry.
+
+        Args:
+            limit: Maximum number of items to fetch
+
+        Returns:
+            List of failed raw news items
+        """
+        try:
+            def _fetch():
+                return (
+                    self.client
+                    .table(self.table_name)
+                    .select("*")
+                    .eq("processing_status", ProcessingStatus.FAILED.value)
+                    .order("updated_at", desc=False)  # Retry oldest failures first
                     .limit(limit)
                     .execute()
                 )
@@ -161,7 +215,7 @@ class RawNewsStorage:
             return result.data or []
 
         except Exception as e:
-            logger.debug(f"Error getting unprocessed news: {e}")
+            logger.debug(f"Error getting failed news: {e}")
             return []
 
     async def get_by_symbol(
@@ -225,9 +279,14 @@ class RawNewsStorage:
                 "updated_at": datetime.now().isoformat()
             }
 
+            # Only set is_processed = True for COMPLETED status
+            # FAILED items should keep is_processed = False so they can be retried
             if status == ProcessingStatus.COMPLETED:
                 update_data["is_processed"] = True
                 update_data["processed_at"] = datetime.now().isoformat()
+            elif status == ProcessingStatus.FAILED:
+                # Explicitly set is_processed = False for failed items
+                update_data["is_processed"] = False
 
             if error_log:
                 update_data["error_log"] = error_log
@@ -245,8 +304,62 @@ class RawNewsStorage:
             return result.data is not None
 
         except Exception as e:
-            logger.debug(f"Error updating processing status: {e}")
+            logger.error(f"Error updating processing status: {e}")
             return False
+
+    async def reset_failed_to_pending(self, limit: int = 100) -> int:
+        """
+        Reset failed items back to pending for retry.
+
+        Args:
+            limit: Maximum number of items to reset
+
+        Returns:
+            Number of items reset
+        """
+        try:
+            # First, get IDs of failed items (Supabase doesn't support limit on update)
+            def _get_failed_ids():
+                return (
+                    self.client
+                    .table(self.table_name)
+                    .select("id")
+                    .eq("processing_status", ProcessingStatus.FAILED.value)
+                    .limit(limit)
+                    .execute()
+                )
+
+            failed_items = await asyncio.to_thread(_get_failed_ids)
+
+            if not failed_items.data:
+                logger.debug("No failed items to reset")
+                return 0
+
+            failed_ids = [item["id"] for item in failed_items.data]
+            logger.info(f"Found {len(failed_ids)} failed items to reset")
+
+            # Update them to pending
+            def _reset():
+                return (
+                    self.client
+                    .table(self.table_name)
+                    .update({
+                        "processing_status": ProcessingStatus.PENDING.value,
+                        "is_processed": False,  # Ensure they can be retried
+                        "updated_at": datetime.now().isoformat()
+                    })
+                    .in_("id", failed_ids)
+                    .execute()
+                )
+
+            result = await asyncio.to_thread(_reset)
+            reset_count = len(result.data) if result.data else 0
+            logger.info(f"Successfully reset {reset_count} items to pending")
+            return reset_count
+
+        except Exception as e:
+            logger.error(f"Error resetting failed items: {e}")
+            return 0
 
     async def delete_old_processed(self, days: int = 30) -> int:
         """
@@ -318,21 +431,36 @@ class RawNewsStorage:
                     .execute()
                 )
 
+            def _get_processing():
+                return (
+                    self.client
+                    .table(self.table_name)
+                    .select("id", count="exact")
+                    .eq("processing_status", ProcessingStatus.PROCESSING.value)
+                    .execute()
+                )
+
             total_result = await asyncio.to_thread(_get_total)
             pending_result = await asyncio.to_thread(_get_pending)
             completed_result = await asyncio.to_thread(_get_completed)
             failed_result = await asyncio.to_thread(_get_failed)
+            processing_result = await asyncio.to_thread(_get_processing)
+
+            logger.info(f"Raw storage stats query results:")
+            logger.info(f"  Table: {self.table_name}")
+            logger.info(f"  Total count: {total_result.count}")
+            logger.info(f"  Failed count: {failed_result.count} (status='{ProcessingStatus.FAILED.value}')")
 
             stats = {
                 "total": total_result.count or 0,
                 "pending": pending_result.count or 0,
                 "completed": completed_result.count or 0,
                 "failed": failed_result.count or 0,
-                "processing": 0  # Would need separate query
+                "processing": processing_result.count or 0
             }
 
             return stats
 
         except Exception as e:
-            logger.debug(f"Error getting stats: {e}")
+            logger.error(f"Error getting stats: {e}")
             return {"total": 0, "pending": 0, "completed": 0, "failed": 0, "processing": 0}
