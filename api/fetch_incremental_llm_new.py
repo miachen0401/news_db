@@ -23,7 +23,8 @@ from src.processors.llm_news_processor import LLMNewsProcessor
 from src.services.llm_categorizer import NewsCategorizer
 from src.db.stock_news import StockNewsDB
 from src.db.data_corrections import DataCorrector
-from src.config import LLM_CONFIG, FETCH_CONFIG, TRACKED_COMPANIES, COMPANY_NEWS_CONFIG
+from src.config import LLM_CONFIG, FETCH_CONFIG, COMPANY_NEWS_CONFIG
+from src.companies import TRACKED_COMPANIES
 import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(

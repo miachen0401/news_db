@@ -34,24 +34,13 @@ FETCH_CONFIG = {
     # Finnhub categories to fetch (will fetch from all listed categories)
     "finnhub_categories": ['general', 'merger'],
     "polygon_limit": 300,          # Max articles from Polygon per fetch
-    "buffer_minutes": 1,           # Overlap window for incremental fetching (avoid gaps)
-}
-
-# Company-specific news tracking (Finnhub /company-news API)
-TRACKED_COMPANIES = {
-    "AAPL": "Apple Inc.",
-    "TSLA": "Tesla Inc.",
-    "NVDA": "NVIDIA Corporation",
-    "MSFT": "Microsoft Corporation",
-    "GOOGL": "Alphabet Inc.",
-    "AMZN": "Amazon.com Inc.",
-    "META": "Meta Platforms Inc.",
+    "buffer_minutes": 0,           # Overlap window for incremental fetching (avoid gaps)
 }
 
 COMPANY_NEWS_CONFIG = {
     "enabled": True,               # Enable/disable company news fetching
     "limit": 50,                   # Max news per company per fetch (Finnhub returns up to 50)
-    "buffer_minutes": 1,           # Overlap window for incremental fetching
+    "buffer_minutes": 0,           # Overlap window for incremental fetching
 }
 
 ALLOWED_CATEGORIES = [
