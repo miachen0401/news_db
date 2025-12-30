@@ -20,6 +20,8 @@ from src.storage.raw_news_storage import RawNewsStorage
 from src.processors.llm_news_processor import LLMNewsProcessor
 from src.services.llm_categorizer import NewsCategorizer
 from src.db.stock_news import StockNewsDB
+from src.models.raw_news import ProcessingStatus
+from src.utils.duplicate_checker import DuplicateFilter
 from src.config import LLM_CONFIG
 import logging
 
@@ -64,6 +66,10 @@ async def main():
     # Initialize storage and managers
     raw_storage = RawNewsStorage(client=supabase)
     stock_news_db = StockNewsDB(client=supabase)
+    duplicate_filter = DuplicateFilter(
+        stock_news_db=stock_news_db,
+        raw_storage=raw_storage
+    )
     llm_processor = LLMNewsProcessor(
         stock_news_db=stock_news_db,
         raw_storage=raw_storage,
@@ -89,10 +95,22 @@ async def main():
 
     failed_count = raw_stats_initial['failed']
     if failed_count > 0:
-        logger.info(f"Resetting {min(failed_count, LLM_CONFIG['processing_limit'])} failed items to pending...")
-        reset_count = await raw_storage.reset_failed_to_pending(limit=failed_count)
-        logger.info(f"Reset {reset_count} failed items to pending for retry")
+        # Prefilter: Check if failed items are duplicates in stock_news table
+        failed_items = await raw_storage.get_failed(limit=failed_count)
+        duplicate_count = await duplicate_filter.filter_and_mark_duplicates(
+            failed_items,
+            ProcessingStatus,
+            item_type="failed items"
+        )
         logger.debug("")
+
+        # Reset remaining failed items to pending for retry
+        remaining_failed = failed_count - duplicate_count
+        if remaining_failed > 0:
+            logger.info(f"Resetting {remaining_failed} non-duplicate failed items to pending...")
+            reset_count = await raw_storage.reset_failed_to_pending(limit=remaining_failed)
+            logger.info(f"Reset {reset_count} failed items to pending for retry")
+            logger.debug("")
 
     # ========================================
     # STEP 1: Process Pending Raw News
@@ -106,13 +124,28 @@ async def main():
     logger.debug("")
 
     if pending_count > 0:
-        logger.info(f"Processing {pending_count} pending items...")
+        # Prefilter: Check if pending items are duplicates in stock_news table
+        pending_items = await raw_storage.get_unprocessed(limit=pending_count)
+        duplicate_count = await duplicate_filter.filter_and_mark_duplicates(
+            pending_items,
+            ProcessingStatus,
+            item_type="pending items"
+        )
         logger.debug("")
+
+        # Update pending count after filtering duplicates
+        remaining_pending = pending_count - duplicate_count
+        if remaining_pending == 0:
+            logger.info("All pending items were duplicates, nothing to process")
+        else:
+            logger.info(f"Processing {remaining_pending} non-duplicate pending items...")
+            logger.debug("")
+
         total_processed = 0
         total_skipped = 0
         total_failed = 0
 
-        while True:
+        while remaining_pending > 0:
             batch_stats = await llm_processor.process_unprocessed_batch(
                 limit=LLM_CONFIG['processing_limit']
             )

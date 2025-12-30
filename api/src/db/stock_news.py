@@ -27,7 +27,7 @@ class StockNewsDB:
     async def insert_news(
         self,
         news_data: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
+    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
         """
         Insert news directly (no LIFO stack).
 
@@ -35,7 +35,7 @@ class StockNewsDB:
             news_data: News data to insert
 
         Returns:
-            Inserted news item or None if failed
+            Tuple of (inserted news item or None, error message or None)
         """
         try:
             url = news_data.get("url")
@@ -55,11 +55,15 @@ class StockNewsDB:
                 dup_result = await asyncio.to_thread(_check_dup)
                 if dup_result.data:
                     logger.debug(f"Duplicate URL detected, skipping: {url[:50]}...")
-                    return None
+                    return None, "Duplicate URL"
 
-            # Prepare news item (no position_in_stack)
+            # Prepare news item                                                                                                 
+            secondary_cat = news_data.get("secondary_category", "")                                                             
+            # Use secondary_category as symbol, fallback to GENERAL if empty                                                    
+            symbol = secondary_cat if secondary_cat else "GENERAL"      
+
             news_item = {
-                "symbol": news_data.get("secondary_category", "GENERAL"),  # Use secondary_category as symbol
+                "symbol": symbol,  # Use secondary_category as symbol
                 "title": news_data.get("title", ""),
                 "summary": news_data.get("summary", ""),
                 "url": url,
@@ -67,10 +71,11 @@ class StockNewsDB:
                 "fetch_source": news_data.get("fetch_source"),
                 "published_at": news_data.get("published_at"),
                 "category": news_data.get("category"),
-                "secondary_category": news_data.get("secondary_category", ""),
+                "secondary_category": secondary_cat,
                 "source_id": news_data.get("source_id"),
                 "external_id": news_data.get("external_id"),
                 "metadata": news_data.get("metadata", {}),
+                "position_in_stack": 1,  # Required NOT NULL field  
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
             }
@@ -82,16 +87,41 @@ class StockNewsDB:
             result = await asyncio.to_thread(_insert)
 
             if result.data:
-                return result.data[0]
+                return result.data[0], None
             else:
-                logger.error(f"Insert failed but no exception: {url[:50] if url else 'no url'}")
-                return None
+                # Insert returned no data - collect error details
+                error_parts = []
+
+                if hasattr(result, 'error') and result.error:
+                    error_parts.append(f"Supabase error: {result.error}")
+                if hasattr(result, 'status_code'):
+                    error_parts.append(f"Status: {result.status_code}")
+
+                error_msg = "; ".join(error_parts) if error_parts else "Insert returned no data"
+
+                logger.error(f"Insert failed: {error_msg}")
+                logger.error(f"  URL: {url[:80] if url else 'no url'}")
+                logger.error(f"  Title: {news_item.get('title', '')[:80]}")
+                logger.error(f"  Category: {news_item.get('category')}")
+                logger.error(f"  Symbol: {news_item.get('symbol')}")
+                logger.debug(f"  News item: {str(news_item)[:500]}")
+
+                return None, error_msg
 
         except Exception as e:
-            logger.error(f"Error inserting news into stock_news: {type(e).__name__}: {str(e)}")
+            error_msg = f"{type(e).__name__}: {str(e)}"
+
+            logger.error(f"Exception during insert: {error_msg}")
             logger.error(f"  URL: {url[:80] if url else 'no url'}")
             logger.error(f"  Category: {news_data.get('category')}")
-            return None
+            logger.error(f"  Title: {news_data.get('title', '')[:80]}")
+
+            # Try to get more details from the exception
+            if hasattr(e, 'response'):
+                logger.error(f"  Response: {e.response}")
+                error_msg += f"; Response: {e.response}"
+
+            return None, error_msg
 
     async def count_items_needing_recategorization(self) -> int:
         """
@@ -218,6 +248,34 @@ class StockNewsDB:
             logger.debug(f"Error updating category: {e}")
             return False
 
+
+    async def check_url_exists(self, url: str) -> bool:
+        """
+        Check if a URL already exists in stock_news table.
+
+        Args:
+            url: URL to check
+
+        Returns:
+            True if URL exists, False otherwise
+        """
+        try:
+            def _check():
+                return (
+                    self.client
+                    .table(self.table_name)
+                    .select("id")
+                    .eq("url", url)
+                    .limit(1)
+                    .execute()
+                )
+
+            result = await asyncio.to_thread(_check)
+            return len(result.data) > 0
+
+        except Exception as e:
+            logger.debug(f"Error checking URL exists: {e}")
+            return False
 
     async def get_stats(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """

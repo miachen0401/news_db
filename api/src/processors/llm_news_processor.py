@@ -199,7 +199,7 @@ class LLMNewsProcessor:
                 processed_data["metadata"]["error_log"] = error_log
                 logger.debug(f"ERROR category: {processed_data['title'][:50]}... - {error_log[:50]}")
             # Store in stock_news table (no LIFO stack, just insert)
-            result = await self.stock_news_db.insert_news(processed_data)
+            result, error_msg = await self.stock_news_db.insert_news(processed_data)
 
             if result:
                 await self.raw_storage.update_processing_status(
@@ -211,8 +211,10 @@ class LLMNewsProcessor:
                 logger.debug(f"Stored [{cat}] {processed_data['title'][:45]}... ({sec_cat or 'general'})")
                 return True
             else:
-                error_msg = f"Failed to insert into stock_news (URL: {processed_data.get('url', '')[:50]})"
-                logger.warning(f"Insert failed for item {item_id}: {processed_data.get('title', '')[:50]}")
+                # Use the detailed error message from insert_news
+                if not error_msg:
+                    error_msg = f"Failed to insert into stock_news (URL: {processed_data.get('url', '')[:50]})"
+                logger.warning(f"Insert failed for item {item_id}: {processed_data.get('title', '')[:50]} - {error_msg}")
                 await self.raw_storage.update_processing_status(
                     item_id,
                     ProcessingStatus.FAILED,
