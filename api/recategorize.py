@@ -217,29 +217,46 @@ async def main():
             total_non_financial = 0
             total_failed_recat = 0
 
-            # Process remaining items in batches
-            while True:
-                recat_stats = await llm_processor.recategorize_batch(
-                    limit=LLM_CONFIG['processing_limit']
-                )
+            # CRITICAL FIX: Fetch ALL items that need re-categorization ONCE
+            # This prevents infinite loop when LLM returns wrong category repeatedly
+            all_items_to_fix = await stock_news_db.get_items_needing_recategorization(
+                limit=remaining_items
+            )
 
-                if recat_stats['fetched'] == 0:
-                    logger.debug("No more items needing re-categorization")
-                    break
+            if not all_items_to_fix:
+                logger.debug("No items to re-categorize")
+            else:
+                logger.info(f"Fetched {len(all_items_to_fix)} items for re-categorization")
+                logger.debug("")
 
-                total_updated += recat_stats['updated']
-                total_non_financial += recat_stats['excluded_marked']
-                total_failed_recat += recat_stats['failed']
+                # Process all items in batches
+                batch_size = LLM_CONFIG['processing_limit']
+                offset = 0
 
-                if recat_stats['recategorized'] == 0:
-                    break
+                while offset < len(all_items_to_fix):
+                    # Get batch of items to process
+                    batch_items = all_items_to_fix[offset:offset + batch_size]
 
-            logger.debug("")
-            logger.info(f"LLM Re-categorization Summary:")
-            logger.info(f"   LLM processed: {total_updated}")
-            logger.info(f"   NON_FINANCIAL (from LLM): {total_non_financial}")
-            logger.info(f"   Failed: {total_failed_recat}")
-            logger.debug("")
+                    logger.debug(f"Processing batch of {len(batch_items)} items")
+
+                    # Process this specific batch
+                    recat_stats = await llm_processor.recategorize_batch(
+                        items_to_fix=batch_items
+                    )
+
+                    total_updated += recat_stats['updated']
+                    total_non_financial += recat_stats['excluded_marked']
+                    total_failed_recat += recat_stats['failed']
+
+                    # Move to next batch
+                    offset += batch_size
+
+                logger.debug("")
+                logger.info(f"LLM Re-categorization Summary:")
+                logger.info(f"   LLM processed: {total_updated}")
+                logger.info(f"   NON_FINANCIAL (from LLM): {total_non_financial}")
+                logger.info(f"   Failed: {total_failed_recat}")
+                logger.debug("")
 
         # ========================================
         # Combined Summary

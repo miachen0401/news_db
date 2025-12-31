@@ -57,13 +57,15 @@ class StockNewsDB:
                     logger.debug(f"Duplicate URL detected, skipping: {url[:50]}...")
                     return None, "Duplicate URL"
 
-            # Prepare news item                                                                                                 
-            secondary_cat = news_data.get("secondary_category", "")                                                             
-            # Use secondary_category as symbol, fallback to GENERAL if empty                                                    
-            symbol = secondary_cat if secondary_cat else "GENERAL"      
+            # Prepare news item
+            # Get symbol from news_data, handle empty strings and null values
+            symbol = news_data.get("symbol", "")
+            # Normalize empty/null values to GENERAL
+            if not symbol or symbol in ("", "empty string", "null"):
+                symbol = "GENERAL"
 
             news_item = {
-                "symbol": symbol,  # Use secondary_category as symbol
+                "symbol": symbol,
                 "title": news_data.get("title", ""),
                 "summary": news_data.get("summary", ""),
                 "url": url,
@@ -71,7 +73,6 @@ class StockNewsDB:
                 "fetch_source": news_data.get("fetch_source"),
                 "published_at": news_data.get("published_at"),
                 "category": news_data.get("category"),
-                "secondary_category": secondary_cat,
                 "source_id": news_data.get("source_id"),
                 "external_id": news_data.get("external_id"),
                 "metadata": news_data.get("metadata", {}),
@@ -206,25 +207,29 @@ class StockNewsDB:
         self,
         item_id: str,
         category: str,
-        secondary_category: str = "",
+        symbol: str = "",
         error_log: Optional[str] = None
     ) -> bool:
         """
-        Update category and secondary_category for a news item.
+        Update category and symbol for a news item.
 
         Args:
             item_id: News item ID
             category: New primary category
-            secondary_category: New secondary category (stock symbols)
+            symbol: Stock ticker symbols (empty string if not company-specific)
             error_log: Error message if categorization failed
 
         Returns:
             True if update successful
         """
         try:
+            # Normalize empty/null values to GENERAL
+            if not symbol or symbol in ("", "empty string", "null"):
+                symbol = "GENERAL"
+
             update_data = {
                 "category": category,
-                "secondary_category": secondary_category,
+                "symbol": symbol,
                 "updated_at": datetime.now().isoformat()
             }
 

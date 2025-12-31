@@ -1,5 +1,11 @@
 # Change Records
 
+## 2025-12-30 11:30: Fixed critical infinite loop in re-categorization when LLM returns wrong category
+Prevents infinite loop by fetching all items needing re-categorization ONCE before processing, instead of continuously querying database. Modified `recategorize_batch()` to accept optional `items_to_fix` parameter - when provided, processes those specific items instead of querying database. Items are processed once per run; any remaining items with wrong categories will be picked up on next run. Removed unused imports (List, RawNewsItem) from llm_news_processor.py.
+
+## 2025-12-30 10:45: Enhanced project documentation with comprehensive structure guide
+Created PROJECT_STRUCTURE.txt with complete directory tree, database schemas, configurations, and workflows. Updated README.md to reference new structure file. Expanded QUICK_API_REFERENCE.md with detailed endpoint documentation, response formats, Python usage examples, and common workflows.
+
 ## 2025-11-18 15:00: Refactored news_db from news_agent submodule to standalone repository
 Created UV-based environment, removed backend dependencies, implemented standalone modules.
 

@@ -180,7 +180,7 @@ async def main():
             return (
                 supabase
                 .table("stock_news")
-                .select("id, title, summary, category, secondary_category, source, published_at")
+                .select("id, title, summary, category, symbol, source, published_at")
                 .gte("published_at", from_time.isoformat())
                 .lte("published_at", to_time.isoformat())
                 .in_("category", INCLUDED_CATEGORIES)  # Only include valid financial categories (whitelist)

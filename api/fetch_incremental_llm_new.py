@@ -373,7 +373,7 @@ async def main():
             return (
                 supabase
                 .table("stock_news")
-                .select("title, category, secondary_category, source, published_at")
+                .select("title, category, symbol, source, published_at")
                 .order("created_at", desc=True)
                 .limit(5)
                 .execute()
@@ -385,11 +385,11 @@ async def main():
             logger.debug("\nRecent News:")
             for item in recent.data:
                 cat = item.get('category', 'N/A')
-                sec_cat = item.get('secondary_category', '')
+                symbol = item.get('symbol', '')
                 title = item.get('title', '')[:60]
                 logger.debug(f"\n[{cat}]")
-                if sec_cat:
-                    logger.debug(f"  Stocks: {sec_cat}")
+                if symbol and symbol != "GENERAL":
+                    logger.debug(f"  Stocks: {symbol}")
                 logger.debug(f"  {title}...")
     logger.debug("")
     # ========================================

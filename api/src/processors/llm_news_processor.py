@@ -1,8 +1,8 @@
 """LLM-based news processor with categorization."""
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime
 
-from src.models.raw_news import RawNewsItem, ProcessingStatus
+from src.models.raw_news import ProcessingStatus
 from src.storage.raw_news_storage import RawNewsStorage
 from src.db.stock_news import StockNewsDB
 from src.services.llm_categorizer import NewsCategorizer
@@ -130,7 +130,7 @@ class LLMNewsProcessor:
                 "source_id": None,
                 "external_id": external_id,
                 "category": categorization.get("primary_category", "UNCATEGORIZED"),
-                "secondary_category": categorization.get("secondary_category", ""),
+                "symbol": categorization.get("symbol", ""),
                 "metadata": {
                     **raw_json,
                     "llm_confidence": categorization.get("confidence", 0.0),
@@ -207,8 +207,8 @@ class LLMNewsProcessor:
                     ProcessingStatus.COMPLETED
                 )
                 cat = processed_data.get('category', '')
-                sec_cat = processed_data.get('secondary_category', '')
-                logger.debug(f"Stored [{cat}] {processed_data['title'][:45]}... ({sec_cat or 'general'})")
+                symbol = processed_data.get('symbol', '')
+                logger.debug(f"Stored [{cat}] {processed_data['title'][:45]}... ({symbol or 'GENERAL'})")
                 return True
             else:
                 # Use the detailed error message from insert_news
@@ -328,7 +328,7 @@ class LLMNewsProcessor:
                 success = await self.stock_news_db.update_category(
                     item_id=item_id,
                     category="MACRO_NOBODY",
-                    secondary_category="",
+                    symbol="",
                     error_log=f"Auto-filtered: category contained 'nobody' ({category})"
                 )
                 if success:
@@ -370,7 +370,7 @@ class LLMNewsProcessor:
                     success = await self.stock_news_db.update_category(
                         item_id=item_id,
                         category=normalized_category,
-                        secondary_category=item.get("secondary_category", ""),
+                        symbol=item.get("symbol", ""),
                         error_log=f"Auto-normalized: '{category}' → '{normalized_category}'"
                     )
                     if success:
@@ -379,7 +379,7 @@ class LLMNewsProcessor:
 
         return normalized_count
 
-    async def recategorize_batch(self, limit: int = 50) -> Dict[str, int]:
+    async def recategorize_batch(self, limit: int = 50, items_to_fix: list = None) -> Dict[str, int]:
         """
         Re-process items needing re-categorization (UNCATEGORIZED + invalid categories).
 
@@ -392,7 +392,9 @@ class LLMNewsProcessor:
         - All valid categories from ALLOWED_CATEGORIES
 
         Args:
-            limit: Maximum number of items to re-process
+            limit: Maximum number of items to re-process (only used if items_to_fix is None)
+            items_to_fix: Optional list of items to process. If provided, processes these specific items.
+                         If None, queries database for items needing re-categorization.
 
         Returns:
             Statistics dict with counts
@@ -405,8 +407,10 @@ class LLMNewsProcessor:
             "failed": 0
         }
 
-        # Get all items needing re-categorization (unified query)
-        items_to_fix = await self.stock_news_db.get_items_needing_recategorization(limit=limit)
+        # Get items to fix (either from parameter or query database)
+        if items_to_fix is None:
+            items_to_fix = await self.stock_news_db.get_items_needing_recategorization(limit=limit)
+
         stats["fetched"] = len(items_to_fix)
 
         if not items_to_fix:
@@ -456,7 +460,7 @@ class LLMNewsProcessor:
                 item_id = stock_item.get("id")
                 old_category = stock_item.get("category", "UNKNOWN")
                 new_category = item_data.get("primary_category", "UNCATEGORIZED")
-                new_secondary = item_data.get("secondary_category", "")
+                new_symbol = item_data.get("symbol", "")
                 api_error = item_data.get("api_error", None)
 
                 # If ERROR category, save error_log and don't retry again
@@ -465,7 +469,7 @@ class LLMNewsProcessor:
                     success = await self.stock_news_db.update_category(
                         item_id=item_id,
                         category="ERROR",
-                        secondary_category="",
+                        symbol="",
                         error_log=error_log
                     )
                     if success:
@@ -478,7 +482,7 @@ class LLMNewsProcessor:
                     success = await self.stock_news_db.update_category(
                         item_id=item_id,
                         category="UNCATEGORIZED",
-                        secondary_category="",
+                        symbol="",
                         error_log=f"Changed from invalid category: {old_category}"
                     )
                     if success:
@@ -495,16 +499,16 @@ class LLMNewsProcessor:
                 success = await self.stock_news_db.update_category(
                     item_id=item_id,
                     category=new_category,
-                    secondary_category=new_secondary,
+                    symbol=new_symbol,
                     error_log=""  # Clear any previous error
                 )
 
                 if success:
                     stats["updated"] += 1
                     if old_category != new_category:
-                        logger.debug(f"Fixed [{old_category}→{new_category}] {stock_item.get('title', '')[:45]}... ({new_secondary or 'general'})")
+                        logger.debug(f"Fixed [{old_category}→{new_category}] {stock_item.get('title', '')[:45]}... ({new_symbol or 'GENERAL'})")
                     else:
-                        logger.debug(f"Updated [{new_category}] {stock_item.get('title', '')[:45]}... ({new_secondary or 'general'})")
+                        logger.debug(f"Updated [{new_category}] {stock_item.get('title', '')[:45]}... ({new_symbol or 'GENERAL'})")
                 else:
                     stats["failed"] += 1
 

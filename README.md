@@ -316,55 +316,49 @@ The system uses 15 categories:
 
 ## File Structure
 
+The project is organized into several key directories:
+
 ```
 news_db/
-├── fetch_incremental_llm.py           # Production: incremental news fetching
-├── test_fetch_llm_for_new_databse.py  # Initial database setup
-├── generate_daily_summary.py          # Generate daily highlights
+├── api/                               # FastAPI application
+│   ├── fetch_incremental_llm_new.py   # Incremental news fetching
+│   ├── generate_daily_summary.py      # Daily summary generation
+│   ├── recategorize.py                # Re-categorization pipeline
+│   └── src/                           # Core application code
+│       ├── config.py                  # Central configuration
+│       ├── companies.py               # Company watchlist
+│       ├── fetchers/                  # News API fetchers
+│       ├── processors/                # LLM processing pipelines
+│       ├── services/                  # Business logic (LLM categorizer, summarizer)
+│       ├── db/                        # Database operations
+│       ├── storage/                   # Storage layer (raw news, state)
+│       ├── models/                    # Data models
+│       └── utils/                     # Utilities
 │
-├── src/                               # Production code (for FastAPI)
-│   ├── __init__.py
-│   ├── config.py                      # Central configuration
-│   │
-│   ├── fetchers/
-│   │   └── general_news_fetcher.py    # Finnhub + Polygon API
-│   │
-│   ├── processors/
-│   │   └── llm_news_processor.py      # LLM categorization pipeline
-│   │
-│   ├── services/
-│   │   ├── llm_categorizer.py         # Zhipu AI categorization
-│   │   └── daily_summarizer.py        # Zhipu AI daily summaries
-│   │
-│   ├── db/
-│   │   ├── stock_news.py              # stock_news operations
-│   │   ├── daily_highlights.py        # daily_highlights operations
-│   │   └── data_corrections.py        # Database cleanup utilities
-│   │
-│   ├── storage/
-│   │   ├── raw_news_storage.py        # Raw data staging
-│   │   └── fetch_state_manager.py     # Timestamp tracking
-│   │
-│   └── models/
-│       └── raw_news.py                # Data models
+├── api_server.py                      # FastAPI server entry point
+├── trigger_remote.py                  # Remote API trigger script
 │
-├── migrations/
-│   ├── create_daily_highlights_table.sql  # Daily highlights schema
-│   └── alter_add_finnhub_max_id.sql       # Add finnhub_max_id column
+├── docs/                              # Documentation
+│   ├── PROJECT_STRUCTURE.txt          # Complete project structure
+│   ├── QUICK_API_REFERENCE.md         # API endpoints reference
+│   ├── DEPLOYMENT.md                  # Deployment guide
+│   ├── RECORD_Change.md               # Change history
+│   └── drafts/                        # Draft documentation
 │
-├── run_data_corrections.py           # Standalone data correction script
+├── sql_query_archive/                 # SQL migrations
+│   ├── schema*.sql                    # Database schemas
+│   ├── alter*.sql                     # Schema alterations
+│   └── create*.sql                    # Table creation scripts
 │
-├── .log/                              # Local cache for daily summaries
-│   ├── .gitkeep
-│   ├── README.md
-│   └── summary_*.log                  # Cached summary files (gitignored)
-│
-└── docs/
-    ├── DAILY_SUMMARY_GUIDE.md         # Daily summary documentation
-    └── CONFIGURATION_GUIDE.md         # Configuration reference
+├── tests/                             # Test suite
+└── .log/                              # Local cache for summaries
 ```
 
-**Note:** All production code is in the `src/` folder for easy FastAPI integration.
+**📖 See [Project Structure](docs/PROJECT_STRUCTURE.txt) for:**
+- Complete directory tree with descriptions
+- Database schema details
+- Key configurations and workflows
+- File naming conventions
 
 ## API Rate Limits
 
@@ -458,13 +452,12 @@ ORDER BY summary_date DESC;
 
 ## Documentation
 
-- **[Daily Summary Guide](docs/DAILY_SUMMARY_GUIDE.md)** - Daily highlights feature
-- **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)** - System configuration
-- `docs/CODE_CLEANUP_2025-11-22.md` - System migration details
-- `docs/FIX_Database_Docs.md` - Database fixes and migrations
-- `docs/RECORD_Change.md` - Complete change history
-- `news_category.txt` - Full category definitions
-- `daliysummary.txt` - Daily summary requirements
+- **[Project Structure](docs/PROJECT_STRUCTURE.txt)** - Complete codebase structure and architecture
+- **[Quick API Reference](docs/QUICK_API_REFERENCE.md)** - API endpoints and quick commands
+- **[Deployment Guide](docs/DEPLOYMENT.md)** - Render deployment instructions
+- **[Change History](docs/RECORD_Change.md)** - Complete change log
+- `docs/drafts/news_catogory.txt` - Full category definitions
+- `docs/drafts/daliysummary.txt` - Daily summary requirements
 
 ## Recent Changes
 

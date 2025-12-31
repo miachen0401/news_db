@@ -133,7 +133,7 @@ Output format (JSON array):
   {{
     "news_id": 1,
     "primary_category": "CATEGORY_NAME",
-    "secondary_category": "STOCK_SYMBOLS or empty string",
+    "symbol": "STOCK_SYMBOLS or empty string",
     "confidence": 0.0-1.0
   }},
   ...
@@ -298,7 +298,7 @@ Output only the JSON array, no additional text."""
                             all_results.append({
                                 **item,
                                 'primary_category': 'ERROR',
-                                'secondary_category': '',
+                                'symbol': '',
                                 'confidence': 0.0,
                                 'api_error': parse_error
                             })
@@ -309,7 +309,7 @@ Output only the JSON array, no additional text."""
                         all_results.append({
                             **item,
                             'primary_category': 'ERROR',
-                            'secondary_category': '',
+                            'symbol': '',
                             'confidence': 0.0,
                             'api_error': error_msg  # Include error details
                         })
@@ -325,7 +325,7 @@ Output only the JSON array, no additional text."""
                     all_results.append({
                         **item,
                         'primary_category': 'ERROR',
-                        'secondary_category': '',
+                        'symbol': '',
                         'confidence': 0.0,
                         'api_error': exception_error
                     })
@@ -354,7 +354,7 @@ Output only the JSON array, no additional text."""
 
         return results[0] if results else {
             'primary_category': 'UNCATEGORIZED',
-            'secondary_category': '',
+            'symbol': '',
             'confidence': 0.0
         }
 

@@ -83,3 +83,6 @@ dmypy.json
 
 # Files or folders
 backups/
+supabase/
+
+to_do.txt

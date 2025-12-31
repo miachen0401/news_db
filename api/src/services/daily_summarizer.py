@@ -58,11 +58,11 @@ class DailySummarizer:
                 title = item.get('title', 'No title')
                 summary = item.get('summary', 'No summary')
                 published_at = item.get('published_at', 'Unknown time')
-                secondary_category = item.get('secondary_category', '')
+                symbol = item.get('symbol', '')
 
                 news_list.append(f"\n{idx}. [{published_at}] {title}")
-                if secondary_category:
-                    news_list.append(f"   Stocks: {secondary_category}")
+                if symbol and symbol != "GENERAL":
+                    news_list.append(f"   Stocks: {symbol}")
                 if summary:
                     news_list.append(f"   Summary: {summary}")
 
@@ -80,7 +80,7 @@ Generate a concise daily highlight summary of the following news articles. Focus
 1. **Structure**: Organize by themes/sectors (e.g., Tech, Finance, Macro, Energy, etc.)
 2. **Prioritize**: Focus on earnings, major corporate actions, policy changes, and significant market-moving events
 3. **Brevity**: Keep each item to 1-2 sentences maximum
-4. **Stocks**: Mention specific tickers when relevant (use the secondary_category field)
+4. **Stocks**: Mention specific tickers when relevant (use the symbol field)
 5. **Exclude**: Filter out minor news, opinion pieces without substance, or redundant information
 6. **Tone**: Professional, factual, action-oriented
 

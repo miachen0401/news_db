@@ -1,29 +1,14 @@
-# Crontab Setup for Local Triggering
-#
-# This allows you to trigger the remote API jobs from your local computer
-# even when Render free tier spins down the service.
-#
-# Setup Instructions:
-# 1. Update API_URL in trigger_remote.py with your Render URL
-# 2. Make the script executable: chmod +x trigger_remote.py
-# 3. Edit your crontab: crontab -e
-# 4. Add the lines below (update paths as needed)
-#
-# Crontab format: minute hour day month weekday command
-# Example times are in your local timezone
+SHELL=/bin/zsh
+PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin
 
-# Trigger news fetch every hour
-0 * * * * cd /Users/miaomiao/Documents/pythonProject/news_db && /usr/bin/python3 trigger_remote.py fetch >> /Users/miaomiao/Documents/pythonProject/news_db/.log/cron_fetch.log 2>&1
+ROOT=/Users/miaomiao/projects/news_db
+PY=/Users/miaomiao/projects/news_db/.venv/bin/python3
+LOGDIR=/Users/miaomiao/projects/news_db/.log
 
-# Trigger re-categorization every 4 hours
-0 */4 * * * cd /Users/miaomiao/Documents/pythonProject/news_db && /usr/bin/python3 trigger_remote.py recategorize >> /Users/miaomiao/Documents/pythonProject/news_db/.log/cron_recat.log 2>&1
+*/5 * * * * /usr/bin/curl -fsS https://news-db-1pgr.onrender.com/health -o /dev/null >> $LOGDIR/cron_ping.log 2>&1
 
-# Trigger daily summary at 7 AM and 5 PM
-0 7 * * * cd /Users/miaomiao/Documents/pythonProject/news_db && /usr/bin/python3 trigger_remote.py summary >> /Users/miaomiao/Documents/pythonProject/news_db/.log/cron_summary.log 2>&1
-0 17 * * * cd /Users/miaomiao/Documents/pythonProject/news_db && /usr/bin/python3 trigger_remote.py summary >> /Users/miaomiao/Documents/pythonProject/news_db/.log/cron_summary.log 2>&1
+*/5 * * * * /bin/date '+\%F \%T status' >> $LOGDIR/cron_status.log 2>&1; $PY $ROOT/trigger_remote.py status >> $LOGDIR/cron_status.log 2>&1
 
-# Check status daily at 8 AM
-0 8 * * * cd /Users/miaomiao/Documents/pythonProject/news_db && /usr/bin/python3 trigger_remote.py status >> /Users/miaomiao/Documents/pythonProject/news_db/.log/cron_status.log 2>&1
-
-# Alternative: Use macOS launchd instead of cron (more reliable on Mac)
-# See: https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html
+0 * * * * $PY $ROOT/trigger_remote.py fetch >> $LOGDIR/cron_fetch.log 2>&1
+#30 */2 * * * $PY $ROOT/trigger_remote.py recategorize >> $LOGDIR/cron_recat.log 2>&1
+0 5,15 * * * $PY $ROOT/trigger_remote.py summary >> $LOGDIR/cron_summary.log 2>&1

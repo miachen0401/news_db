@@ -1,0 +1,300 @@
+PROJECT STRUCTURE
+=================
+
+news_db/                                    # Root directory
+│
+├── .claude/                                # Claude Code configuration
+│   ├── CLAUDE.md                           # Project-specific Claude instructions
+│   └── settings.local.json                 # Local settings
+│
+├── .log/                                   # Local cache for daily summaries (gitignored)
+│   ├── README.md                           # Log directory documentation
+│   └── summary_*.log                       # Cached summary files (timestamped)
+│
+├── .venv/                                  # Python virtual environment (gitignored)
+│
+├── api/                                    # FastAPI application code
+│   ├── __init__.py
+│   ├── fetch_incremental_llm_new.py        # Incremental news fetching pipeline
+│   ├── generate_daily_summary.py           # Daily summary generation
+│   ├── recategorize.py                     # Re-categorization of existing news
+│   │
+│   ├── .log/                               # API-specific log cache
+│   │
+│   └── src/                                # Core application source code
+│       ├── __init__.py
+│       ├── companies.py                    # Company watchlist configuration
+│       ├── config.py                       # Central configuration (LLM, fetch, categories)
+│       │
+│       ├── db/                             # Database operations
+│       │   ├── __init__.py
+│       │   ├── daily_highlights.py         # Daily highlights CRUD operations
+│       │   ├── data_corrections.py         # Database cleanup utilities
+│       │   └── stock_news.py               # Stock news CRUD operations
+│       │
+│       ├── fetchers/                       # News fetching modules
+│       │   ├── __init__.py
+│       │   └── general_news_fetcher.py     # Finnhub & Polygon API fetchers
+│       │
+│       ├── models/                         # Data models
+│       │   ├── __init__.py
+│       │   └── raw_news.py                 # Raw news data models
+│       │
+│       ├── processors/                     # Processing pipelines
+│       │   ├── __init__.py
+│       │   └── llm_news_processor.py       # LLM categorization pipeline
+│       │
+│       ├── services/                       # Business logic services
+│       │   ├── __init__.py
+│       │   ├── daily_summarizer.py         # Zhipu AI daily summary service
+│       │   └── llm_categorizer.py          # Zhipu AI categorization service
+│       │
+│       ├── storage/                        # Storage layer
+│       │   ├── __init__.py
+│       │   ├── fetch_state_manager.py      # Timestamp tracking & state management
+│       │   └── raw_news_storage.py         # Raw data staging operations
+│       │
+│       └── utils/                          # Utility modules
+│           ├── __init__.py
+│           └── duplicate_checker.py        # Duplicate detection utilities
+│
+├── docs/                                   # Documentation
+│   ├── DEPLOYMENT.md                       # Deployment guide (Render)
+│   ├── GET_Requests.json                   # API request examples
+│   ├── PROJECT_STRUCTURE.txt               # This file - complete project structure
+│   ├── QUICK_API_REFERENCE.md              # Quick API endpoint reference
+│   ├── RECORD_Change.md                    # Change history log
+│   ├── crontab_setup.txt                   # Cron job configuration examples
+│   │
+│   └── drafts/                             # Draft documentation
+│       ├── daliysummary.txt                # Daily summary requirements
+│       └── news_catogory.txt               # Category definitions
+│
+├── sql_query_archive/                      # SQL migrations and queries
+│   ├── schema.sql                          # Initial database schema
+│   ├── schema_stock_news.sql               # Stock news table schema
+│   ├── schema_fetch_state.sql              # Fetch state table schema
+│   ├── alter_add_fetch_source.sql          # Add fetch_source column
+│   ├── alter_add_secondary_category.sql    # Add secondary_category column
+│   ├── create_daily_highlights_table.sql   # Daily highlights table schema
+│   ├── alter_add_error_log_to_stock_news.sql # Add error logging
+│   └── category_check.sql                  # Category validation queries
+│
+├── tests/                                  # Test suite
+│   ├── test_model_connection.py            # Database connection tests
+│   └── test_model_quick.py                 # Quick model tests
+│
+├── __init__.py                             # Root package init
+├── api_server.py                           # FastAPI server entry point
+├── trigger_remote.py                       # Remote API trigger script
+│
+├── .env                                    # Environment variables (gitignored)
+├── .gitignore                              # Git ignore patterns
+├── .mcp.json                               # MCP server configuration
+├── README.md                               # Main project documentation
+├── render.yaml                             # Render deployment configuration
+├── requirements.txt                        # Python dependencies
+└── pyproject.toml                          # Python project metadata
+
+
+DATABASE SCHEMA
+===============
+
+stock_news_raw                              # Staging area for raw API responses
+├── id (PK)                                 # Unique identifier
+├── url (UNIQUE)                            # Article URL (deduplication key)
+├── raw_json                                # Complete API response JSON
+├── published_at                            # Actual news timestamp (UTC)
+├── fetch_source                            # Source: finnhub_general, finnhub_merger, polygon, finnhub_SYMBOL
+├── processing_status                       # pending/completed/failed
+├── created_at                              # Record creation timestamp
+└── updated_at                              # Last update timestamp
+
+stock_news                                  # Production table with categorized news
+├── id (PK)                                 # Unique identifier
+├── symbol                                  # Stock symbol (if applicable)
+├── category                                # Primary LLM category (15 categories)
+├── headline                                # Article headline
+├── summary                                 # Article summary
+├── url (UNIQUE)                            # Article URL
+├── published_at                            # News timestamp (UTC)
+├── source                                  # News source
+├── related_stocks                          # Related stock symbols (array)
+├── error_log                               # Error messages (if any)
+├── created_at                              # Record creation timestamp
+└── updated_at                              # Last update timestamp
+
+fetch_state                                 # Tracks incremental fetch checkpoints
+├── id (PK)                                 # Unique identifier
+├── symbol                                  # Symbol or 'polygon', 'finnhub_general', 'finnhub_merger'
+├── fetch_source                            # Source identifier
+├── last_fetch_from                         # Start of last fetch window (UTC)
+├── last_fetch_to                           # End of last fetch window (UTC)
+├── finnhub_max_id                          # Finnhub incremental ID checkpoint
+├── articles_fetched                        # Count of articles fetched
+├── articles_stored                         # Count of articles stored
+├── created_at                              # Record creation timestamp
+└── updated_at                              # Last update timestamp
+
+daily_highlights                            # Historical daily summaries
+├── id (PK)                                 # Unique identifier
+├── summary_date                            # Date of summary (EST)
+├── summary_time                            # Time of summary generation (EST)
+├── from_time                               # Start of news window (UTC)
+├── to_time                                 # End of news window (UTC)
+├── highlight_text                          # LLM-generated summary
+├── news_count                              # Number of articles summarized
+├── categories_included                     # Categories in summary (array)
+├── created_at                              # Record creation timestamp
+└── updated_at                              # Last update timestamp
+
+
+KEY CONFIGURATIONS
+==================
+
+LLM Models (api/src/config.py)
+├── Categorization: glm-4-flash (temp=0.3, batch_size=5, limit=20)
+├── Summarization: glm-4-flash (temp=0.3, timeout=120s)
+├── Concurrency: 1 concurrent request (rate limit protection)
+└── Retry: 2 max retries with exponential backoff
+
+News Sources
+├── Finnhub: General news, merger news, company-specific news
+├── Polygon: General market news with date range filtering
+└── Buffer: 1-minute overlap to prevent gaps
+
+Tracked Companies (7 companies)
+├── AAPL: Apple Inc.
+├── TSLA: Tesla Inc.
+├── NVDA: NVIDIA Corporation
+├── MSFT: Microsoft Corporation
+├── GOOGL: Alphabet Inc.
+├── AMZN: Amazon.com Inc.
+└── META: Meta Platforms Inc.
+
+News Categories (15 total)
+Financial (13 included in summaries):
+├── MACRO_ECONOMIC                          # Macroeconomic indicators
+├── CENTRAL_BANK_POLICY                     # Monetary policy, interest rates
+├── GEOPOLITICAL_SPECIFIC                   # Named countries/leaders
+├── INDUSTRY_REGULATION                     # Regulatory news for sectors
+├── EARNINGS_FINANCIALS                     # Earnings, revenue, financials
+├── CORPORATE_ACTIONS                       # M&A, stock splits, buybacks
+├── MANAGEMENT_CHANGES                      # CEO, CFO, board changes
+├── PRODUCT_TECH_UPDATE                     # New products, R&D, launches
+├── BUSINESS_OPERATIONS                     # Supply chain, contracts
+├── ACCIDENT_INCIDENT                       # Breaches, accidents, lawsuits
+├── ANALYST_RATING                          # Analyst upgrades/downgrades
+├── MARKET_SENTIMENT                        # Investor sentiment, flows
+└── COMMODITY_FOREX_CRYPTO                  # Commodities, forex, crypto
+
+Excluded (2):
+├── MACRO_NOBODY                            # Generic geopolitical commentary
+└── NON_FINANCIAL                           # Non-market news
+
+
+API ENDPOINTS
+=============
+
+FastAPI Server (api_server.py)
+├── GET  /                                  # Health check & status
+├── GET  /status                            # Detailed system status
+├── POST /trigger/fetch                     # Trigger incremental fetch
+├── POST /trigger/recategorize              # Trigger re-categorization
+├── POST /trigger/summary                   # Trigger daily summary
+├── POST /trigger/all                       # Trigger all jobs
+├── GET  /news/company/{symbols}            # Get company-specific news
+└── GET  /summary/daily                     # Get latest daily summary
+
+
+DEPLOYMENT
+==========
+
+Local Development
+├── uv sync                                 # Install dependencies
+├── uv run python api_server.py             # Run FastAPI server
+└── curl http://localhost:8000/status       # Check status
+
+Production (Render)
+├── Platform: Render.com
+├── Service Type: Web Service
+├── Start Command: uvicorn api_server:app --host 0.0.0.0 --port $PORT
+└── Environment: Python 3.11
+
+Monitoring
+├── Logs: Render dashboard or curl /status
+├── Database: Supabase SQL Editor
+└── Local cache: .log/ directory for summaries
+
+
+WORKFLOWS
+=========
+
+Initial Setup (Empty Database)
+├── 1. Configure .env with API keys
+├── 2. Run SQL migrations in Supabase
+├── 3. Edit TARGET_DATE in test_fetch_llm_for_new_databse.py
+└── 4. Execute: uv run python test_fetch_llm_for_new_databse.py
+
+Incremental Updates (Production)
+├── 1. Trigger: curl -X POST $API_URL/trigger/fetch
+├── 2. Fetches news since last checkpoint (timestamp-based)
+├── 3. LLM categorization (batches of 5, max 20 items)
+├── 4. Stores financial news (filters NON_FINANCIAL)
+├── 5. Data corrections (cleanup empty strings)
+└── 6. Updates checkpoint for next run
+
+Daily Summary Generation
+├── 1. Trigger: curl -X POST $API_URL/trigger/summary
+├── 2. Fetches news from 6PM EST (previous day) to now
+├── 3. Filters to 13 valid categories (excludes MACRO_NOBODY)
+├── 4. LLM generates structured summary
+├── 5. Saves to daily_highlights table
+└── 6. Caches locally in .log/summary_YYYY-MM-DD_HH-MM-SS.log
+
+Re-categorization
+├── 1. Trigger: curl -X POST $API_URL/trigger/recategorize
+├── 2. Finds pending/failed items in stock_news_raw
+├── 3. Pre-filters "nobody" categories
+├── 4. Re-categorizes with LLM
+└── 5. Updates stock_news table
+
+
+FILE NAMING CONVENTIONS
+=======================
+
+Python Modules
+├── snake_case.py                           # All Python files
+└── Modules organized by function (fetchers, processors, services, etc.)
+
+Documentation
+├── UPPERCASE_DESCRIPTION.md                # Major docs (README, DEPLOYMENT)
+├── lowercase_description.txt               # Draft/notes (news_category, daliysummary)
+└── All saved in docs/ folder
+
+SQL Files
+├── snake_case.sql                          # Migration and query files
+├── Prefix: schema_, alter_, create_        # Indicates operation type
+└── All saved in sql_query_archive/
+
+Log Files
+├── summary_YYYY-MM-DD_HH-MM-SS.log         # Daily summary cache files
+└── Saved in .log/ directory (gitignored)
+
+
+VERSION CONTROL
+===============
+
+Tracked Files
+├── Source code: *.py
+├── Documentation: docs/*.md, docs/*.txt
+├── Configuration: .mcp.json, render.yaml, requirements.txt, pyproject.toml
+├── SQL: sql_query_archive/*.sql
+└── Claude settings: .claude/CLAUDE.md
+
+Ignored Files (.gitignore)
+├── .env                                    # Environment variables (secrets)
+├── .venv/                                  # Virtual environment
+├── __pycache__/                            # Python bytecode
+├── .log/**/*.log                           # Log files (except README.md)
+└── *.pyc, *.pyo                            # Compiled Python files

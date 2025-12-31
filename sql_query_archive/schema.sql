@@ -1,252 +1,677 @@
--- ============================================================
--- Supabase Schema for News Fetching System
--- ============================================================
-
--- ============================================================
--- 1. stock_news_raw (Data Lake)
--- ============================================================
--- Stores raw unprocessed news from all sources
-
-CREATE TABLE IF NOT EXISTS stock_news_raw (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- Core fields
-    symbol TEXT NOT NULL,
-    raw_html TEXT,                          -- HTML from web scraping
-    raw_json JSONB,                         -- JSON from APIs
-    url TEXT NOT NULL,
-    fetch_source TEXT NOT NULL,             -- finnhub, polygon, newsapi, yfinance, etc.
-    fetched_at TIMESTAMPTZ NOT NULL,
-
-    -- Processing state
-    is_processed BOOLEAN DEFAULT FALSE,
-    processed_at TIMESTAMPTZ,
-    processing_status TEXT DEFAULT 'pending',  -- pending/processing/completed/failed
-    error_log TEXT,
-
-    -- Additional data
-    metadata JSONB DEFAULT '{}'::jsonb,
-    content_hash TEXT,                      -- MD5 hash for deduplication
-
-    -- Timestamps
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Indexes for stock_news_raw
-CREATE INDEX IF NOT EXISTS idx_stock_news_raw_symbol
-    ON stock_news_raw(symbol);
-
-CREATE INDEX IF NOT EXISTS idx_stock_news_raw_unprocessed
-    ON stock_news_raw(is_processed, created_at DESC)
-    WHERE is_processed = FALSE;
-
-CREATE INDEX IF NOT EXISTS idx_stock_news_raw_content_hash
-    ON stock_news_raw(content_hash);
-
-CREATE INDEX IF NOT EXISTS idx_stock_news_raw_status
-    ON stock_news_raw(processing_status);
-
-CREATE INDEX IF NOT EXISTS idx_stock_news_raw_source
-    ON stock_news_raw(fetch_source);
-
--- Comments
-COMMENT ON TABLE stock_news_raw IS 'Data lake for raw unprocessed news from all sources';
-COMMENT ON COLUMN stock_news_raw.symbol IS 'Stock ticker symbol (e.g., AAPL, TSLA)';
-COMMENT ON COLUMN stock_news_raw.raw_html IS 'Raw HTML content from web scraping';
-COMMENT ON COLUMN stock_news_raw.raw_json IS 'Raw JSON response from APIs';
-COMMENT ON COLUMN stock_news_raw.fetch_source IS 'Source API (finnhub, polygon, newsapi, yfinance)';
-COMMENT ON COLUMN stock_news_raw.processing_status IS 'Processing status (pending/processing/completed/failed)';
-COMMENT ON COLUMN stock_news_raw.content_hash IS 'MD5 hash of URL for deduplication';
 
 
--- ============================================================
--- 2. fetch_log (Tracking)
--- ============================================================
--- Tracks all fetch operations for monitoring
 
-CREATE TABLE IF NOT EXISTS fetch_log (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- Fetch metadata
-    fetch_source TEXT NOT NULL,             -- finnhub, polygon, etc.
-    symbols TEXT[] NOT NULL,                -- Symbols fetched
-
-    -- Statistics
-    articles_fetched INT NOT NULL DEFAULT 0,
-    articles_stored INT NOT NULL DEFAULT 0,
-    articles_duplicates INT NOT NULL DEFAULT 0,
-    articles_failed INT NOT NULL DEFAULT 0,
-
-    -- Timing
-    started_at TIMESTAMPTZ NOT NULL,
-    completed_at TIMESTAMPTZ,
-    duration_seconds NUMERIC,
-
-    -- Status
-    status TEXT NOT NULL DEFAULT 'running',  -- running/completed/failed
-    error_message TEXT,
-
-    -- Additional data
-    metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Indexes for fetch_log
-CREATE INDEX IF NOT EXISTS idx_fetch_log_source
-    ON fetch_log(fetch_source);
-
-CREATE INDEX IF NOT EXISTS idx_fetch_log_status
-    ON fetch_log(status);
-
-CREATE INDEX IF NOT EXISTS idx_fetch_log_created
-    ON fetch_log(created_at DESC);
-
--- Comments
-COMMENT ON TABLE fetch_log IS 'Tracks all news fetch operations for monitoring';
-COMMENT ON COLUMN fetch_log.fetch_source IS 'Source of the fetch operation';
-COMMENT ON COLUMN fetch_log.articles_fetched IS 'Total articles fetched from API';
-COMMENT ON COLUMN fetch_log.articles_stored IS 'Articles successfully stored';
-COMMENT ON COLUMN fetch_log.articles_duplicates IS 'Duplicate articles skipped';
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
 
 
--- ============================================================
--- 3. summaries (AI-Generated Summaries)
--- ============================================================
--- Stores AI-generated summaries for news articles
-
-CREATE TABLE IF NOT EXISTS summaries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    -- Reference to news article
-    news_id UUID REFERENCES stock_news(id) ON DELETE CASCADE,
-
-    -- Summary content
-    summary_type TEXT NOT NULL,             -- brief/detailed/sentiment/key_points
-    content TEXT NOT NULL,
-
-    -- Generation metadata
-    model_used TEXT,                        -- gpt-4, claude-3, etc.
-    tokens_used INT,
-    processing_time_ms INT,
-    confidence_score NUMERIC,               -- 0-1 confidence in summary quality
-
-    -- Additional data
-    metadata JSONB DEFAULT '{}'::jsonb,
-
-    -- Timestamps
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Indexes for summaries
-CREATE INDEX IF NOT EXISTS idx_summaries_news_id
-    ON summaries(news_id);
-
-CREATE INDEX IF NOT EXISTS idx_summaries_type
-    ON summaries(summary_type);
-
-CREATE INDEX IF NOT EXISTS idx_summaries_created
-    ON summaries(created_at DESC);
-
--- Comments
-COMMENT ON TABLE summaries IS 'AI-generated summaries for news articles';
-COMMENT ON COLUMN summaries.news_id IS 'Reference to stock_news table';
-COMMENT ON COLUMN summaries.summary_type IS 'Type of summary (brief/detailed/sentiment/key_points)';
-COMMENT ON COLUMN summaries.model_used IS 'AI model used for generation (e.g., gpt-4, claude-3)';
+CREATE SCHEMA IF NOT EXISTS "public";
 
 
--- ============================================================
--- 4. Update trigger for updated_at
--- ============================================================
+ALTER SCHEMA "public" OWNER TO "pg_database_owner";
 
--- Function to update updated_at timestamp
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
+
+COMMENT ON SCHEMA "public" IS 'standard public schema';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."increment_news_positions"("p_symbol" "text") RETURNS "void"
+    LANGUAGE "plpgsql"
+    AS $$
+BEGIN
+    UPDATE stock_news
+    SET position_in_stack = position_in_stack + 1
+    WHERE symbol = p_symbol;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."increment_news_positions"("p_symbol" "text") OWNER TO "postgres";
+
+
+COMMENT ON FUNCTION "public"."increment_news_positions"("p_symbol" "text") IS 'Increment all news positions for a symbol (used when pushing new news to LIFO stack)';
+
+
+
+CREATE OR REPLACE FUNCTION "public"."update_updated_at_column"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
 BEGIN
     NEW.updated_at = NOW();
     RETURN NEW;
 END;
-$$ language 'plpgsql';
-
--- Trigger for stock_news_raw
-CREATE TRIGGER update_stock_news_raw_updated_at
-    BEFORE UPDATE ON stock_news_raw
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- Trigger for summaries
-CREATE TRIGGER update_summaries_updated_at
-    BEFORE UPDATE ON summaries
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
+$$;
 
 
--- ============================================================
--- 5. Helpful Views
--- ============================================================
+ALTER FUNCTION "public"."update_updated_at_column"() OWNER TO "postgres";
 
--- View: Unprocessed news count by symbol
-CREATE OR REPLACE VIEW v_unprocessed_news_by_symbol AS
-SELECT
-    symbol,
-    COUNT(*) as pending_count,
-    MIN(created_at) as oldest_pending,
-    MAX(created_at) as newest_pending
-FROM stock_news_raw
-WHERE is_processed = FALSE AND processing_status = 'pending'
-GROUP BY symbol
-ORDER BY pending_count DESC;
+SET default_tablespace = '';
 
--- View: Processing statistics
-CREATE OR REPLACE VIEW v_processing_stats AS
-SELECT
-    processing_status,
-    COUNT(*) as count,
-    COUNT(DISTINCT symbol) as symbols,
-    COUNT(DISTINCT fetch_source) as sources
-FROM stock_news_raw
-GROUP BY processing_status;
-
--- View: Recent fetch operations
-CREATE OR REPLACE VIEW v_recent_fetches AS
-SELECT
-    id,
-    fetch_source,
-    array_length(symbols, 1) as symbol_count,
-    articles_fetched,
-    articles_stored,
-    articles_duplicates,
-    duration_seconds,
-    status,
-    started_at
-FROM fetch_log
-ORDER BY started_at DESC
-LIMIT 100;
+SET default_table_access_method = "heap";
 
 
--- ============================================================
--- 6. Example Queries
--- ============================================================
+CREATE TABLE IF NOT EXISTS "public"."daily_highlights" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "summary_date" "date" NOT NULL,
+    "summary_time" time without time zone NOT NULL,
+    "from_time" timestamp without time zone NOT NULL,
+    "to_time" timestamp without time zone NOT NULL,
+    "highlight_text" "text" NOT NULL,
+    "news_count" integer DEFAULT 0 NOT NULL,
+    "categories_included" "text"[] DEFAULT '{}'::"text"[],
+    "created_at" timestamp without time zone DEFAULT "now"() NOT NULL,
+    "updated_at" timestamp without time zone DEFAULT "now"() NOT NULL
+);
 
--- Check unprocessed news
--- SELECT * FROM stock_news_raw WHERE is_processed = FALSE LIMIT 10;
 
--- Get processing statistics
--- SELECT * FROM v_processing_stats;
+ALTER TABLE "public"."daily_highlights" OWNER TO "postgres";
 
--- Get pending news by symbol
--- SELECT * FROM v_unprocessed_news_by_symbol;
 
--- Find failed processing attempts
--- SELECT id, symbol, url, error_log
--- FROM stock_news_raw
--- WHERE processing_status = 'failed';
+COMMENT ON TABLE "public"."daily_highlights" IS 'Historical daily news summaries generated by LLM';
 
--- Recent fetch operations
--- SELECT * FROM v_recent_fetches;
 
--- Cleanup old processed news (older than 30 days)
--- DELETE FROM stock_news_raw
--- WHERE is_processed = TRUE
--- AND processed_at < NOW() - INTERVAL '30 days';
+
+COMMENT ON COLUMN "public"."daily_highlights"."summary_date" IS 'Date of the summary (EST)';
+
+
+
+COMMENT ON COLUMN "public"."daily_highlights"."summary_time" IS 'Time of the summary (EST)';
+
+
+
+COMMENT ON COLUMN "public"."daily_highlights"."from_time" IS 'Start of news window (6PM EST previous day)';
+
+
+
+COMMENT ON COLUMN "public"."daily_highlights"."to_time" IS 'End of news window (summary_time EST)';
+
+
+
+COMMENT ON COLUMN "public"."daily_highlights"."highlight_text" IS 'LLM-generated daily highlight summary';
+
+
+
+COMMENT ON COLUMN "public"."daily_highlights"."news_count" IS 'Number of news articles included in summary';
+
+
+
+COMMENT ON COLUMN "public"."daily_highlights"."categories_included" IS 'Categories of news included (excludes MACRO_NOBODY)';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."fetch_log" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "fetch_source" "text" NOT NULL,
+    "symbols" "text"[] NOT NULL,
+    "articles_fetched" integer DEFAULT 0 NOT NULL,
+    "articles_stored" integer DEFAULT 0 NOT NULL,
+    "articles_duplicates" integer DEFAULT 0 NOT NULL,
+    "articles_failed" integer DEFAULT 0 NOT NULL,
+    "started_at" timestamp with time zone NOT NULL,
+    "completed_at" timestamp with time zone,
+    "duration_seconds" numeric,
+    "status" "text" DEFAULT 'running'::"text" NOT NULL,
+    "error_message" "text",
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."fetch_log" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."fetch_log" IS 'Tracks all news fetch operations for monitoring';
+
+
+
+COMMENT ON COLUMN "public"."fetch_log"."fetch_source" IS 'Source of the fetch operation';
+
+
+
+COMMENT ON COLUMN "public"."fetch_log"."articles_fetched" IS 'Total articles fetched from API';
+
+
+
+COMMENT ON COLUMN "public"."fetch_log"."articles_stored" IS 'Articles successfully stored';
+
+
+
+COMMENT ON COLUMN "public"."fetch_log"."articles_duplicates" IS 'Duplicate articles skipped';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."fetch_state" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "symbol" "text" NOT NULL,
+    "fetch_source" "text" NOT NULL,
+    "last_fetch_from" timestamp with time zone NOT NULL,
+    "last_fetch_to" timestamp with time zone NOT NULL,
+    "articles_fetched" integer DEFAULT 0,
+    "articles_stored" integer DEFAULT 0,
+    "status" "text" DEFAULT 'success'::"text",
+    "error_message" "text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "finnhub_max_id" bigint
+);
+
+
+ALTER TABLE "public"."fetch_state" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."fetch_state" IS 'Tracks last fetch timestamp per symbol+source for incremental fetching';
+
+
+
+COMMENT ON COLUMN "public"."fetch_state"."last_fetch_from" IS 'Start timestamp of last successful fetch';
+
+
+
+COMMENT ON COLUMN "public"."fetch_state"."last_fetch_to" IS 'End timestamp of last successful fetch (usually NOW())';
+
+
+
+COMMENT ON COLUMN "public"."fetch_state"."articles_fetched" IS 'Number of articles fetched in last run';
+
+
+
+COMMENT ON COLUMN "public"."fetch_state"."articles_stored" IS 'Number of articles stored (after dedup)';
+
+
+
+COMMENT ON COLUMN "public"."fetch_state"."finnhub_max_id" IS 'Maximum Finnhub news ID fetched (for minId parameter in next fetch)';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."stock_news" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "symbol" "text" NOT NULL,
+    "title" "text" NOT NULL,
+    "summary" "text",
+    "url" "text" NOT NULL,
+    "source" "text",
+    "published_at" timestamp with time zone NOT NULL,
+    "sentiment" numeric,
+    "category" "text",
+    "content_hash" "text",
+    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL,
+    "position_in_stack" integer DEFAULT 1 NOT NULL,
+    "source_id" "uuid",
+    "external_id" "text",
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb",
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "fetch_source" "text",
+    "secondary_category" "text",
+    "error_log" "text"
+);
+
+
+ALTER TABLE "public"."stock_news" OWNER TO "postgres";
+
+
+COMMENT ON COLUMN "public"."stock_news"."category" IS 'Primary news category (MACRO_ECONOMIC, EARNINGS_FINANCIALS, etc.)';
+
+
+
+COMMENT ON COLUMN "public"."stock_news"."source_id" IS 'Reference to news_sources table if exists';
+
+
+
+COMMENT ON COLUMN "public"."stock_news"."external_id" IS 'External ID from source API (e.g., Finnhub article ID)';
+
+
+
+COMMENT ON COLUMN "public"."stock_news"."metadata" IS 'Additional flexible data (fetch_source, category, image, etc.)';
+
+
+
+COMMENT ON COLUMN "public"."stock_news"."updated_at" IS 'Last update timestamp';
+
+
+
+COMMENT ON COLUMN "public"."stock_news"."fetch_source" IS 'API source that fetched the news (finnhub, polygon, newsapi, etc.)';
+
+
+
+COMMENT ON COLUMN "public"."stock_news"."secondary_category" IS 'Stock ticker symbols mentioned in the news (comma-separated if multiple), empty if not company-specific';
+
+
+
+COMMENT ON COLUMN "public"."stock_news"."error_log" IS 'Error details when LLM categorization fails (API error code, message, etc.)';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."stock_news_raw" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "symbol" "text" NOT NULL,
+    "raw_html" "text",
+    "raw_json" "jsonb",
+    "url" "text" NOT NULL,
+    "fetch_source" "text" NOT NULL,
+    "fetched_at" timestamp with time zone NOT NULL,
+    "is_processed" boolean DEFAULT false,
+    "processed_at" timestamp with time zone,
+    "processing_status" "text" DEFAULT 'pending'::"text",
+    "error_log" "text",
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb",
+    "content_hash" "text",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"(),
+    "published_at" timestamp with time zone
+);
+
+
+ALTER TABLE "public"."stock_news_raw" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."stock_news_raw" IS 'Data lake for raw unprocessed news from all sources';
+
+
+
+COMMENT ON COLUMN "public"."stock_news_raw"."symbol" IS 'Stock ticker symbol (e.g., AAPL, TSLA)';
+
+
+
+COMMENT ON COLUMN "public"."stock_news_raw"."raw_html" IS 'Raw HTML content from web scraping';
+
+
+
+COMMENT ON COLUMN "public"."stock_news_raw"."raw_json" IS 'Raw JSON response from APIs';
+
+
+
+COMMENT ON COLUMN "public"."stock_news_raw"."fetch_source" IS 'Source API (finnhub, polygon, newsapi, yfinance)';
+
+
+
+COMMENT ON COLUMN "public"."stock_news_raw"."processing_status" IS 'Processing status (pending/processing/completed/failed)';
+
+
+
+COMMENT ON COLUMN "public"."stock_news_raw"."content_hash" IS 'MD5 hash of URL for deduplication';
+
+
+
+COMMENT ON COLUMN "public"."stock_news_raw"."published_at" IS 'Actual news publication timestamp (extracted from API response)';
+
+
+
+CREATE TABLE IF NOT EXISTS "public"."summaries" (
+    "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
+    "news_id" "uuid",
+    "summary_type" "text" NOT NULL,
+    "content" "text" NOT NULL,
+    "model_used" "text",
+    "tokens_used" integer,
+    "processing_time_ms" integer,
+    "confidence_score" numeric,
+    "metadata" "jsonb" DEFAULT '{}'::"jsonb",
+    "created_at" timestamp with time zone DEFAULT "now"(),
+    "updated_at" timestamp with time zone DEFAULT "now"()
+);
+
+
+ALTER TABLE "public"."summaries" OWNER TO "postgres";
+
+
+COMMENT ON TABLE "public"."summaries" IS 'AI-generated summaries for news articles';
+
+
+
+COMMENT ON COLUMN "public"."summaries"."news_id" IS 'Reference to stock_news table';
+
+
+
+COMMENT ON COLUMN "public"."summaries"."summary_type" IS 'Type of summary (brief/detailed/sentiment/key_points)';
+
+
+
+COMMENT ON COLUMN "public"."summaries"."model_used" IS 'AI model used for generation (e.g., gpt-4, claude-3)';
+
+
+
+CREATE OR REPLACE VIEW "public"."v_fetch_state_status" AS
+ SELECT "symbol",
+    "fetch_source",
+    "last_fetch_to",
+    ("now"() - "last_fetch_to") AS "time_since_last_fetch",
+    "articles_fetched",
+    "articles_stored",
+    "status",
+    "updated_at"
+   FROM "public"."fetch_state"
+  ORDER BY "last_fetch_to" DESC;
+
+
+ALTER VIEW "public"."v_fetch_state_status" OWNER TO "postgres";
+
+
+COMMENT ON VIEW "public"."v_fetch_state_status" IS 'Shows fetch state with calculated time since last fetch';
+
+
+
+CREATE OR REPLACE VIEW "public"."v_processing_stats" AS
+ SELECT "processing_status",
+    "count"(*) AS "count",
+    "count"(DISTINCT "symbol") AS "symbols",
+    "count"(DISTINCT "fetch_source") AS "sources"
+   FROM "public"."stock_news_raw"
+  GROUP BY "processing_status";
+
+
+ALTER VIEW "public"."v_processing_stats" OWNER TO "postgres";
+
+
+CREATE OR REPLACE VIEW "public"."v_recent_fetches" AS
+ SELECT "id",
+    "fetch_source",
+    "array_length"("symbols", 1) AS "symbol_count",
+    "articles_fetched",
+    "articles_stored",
+    "articles_duplicates",
+    "duration_seconds",
+    "status",
+    "started_at"
+   FROM "public"."fetch_log"
+  ORDER BY "started_at" DESC
+ LIMIT 100;
+
+
+ALTER VIEW "public"."v_recent_fetches" OWNER TO "postgres";
+
+
+CREATE OR REPLACE VIEW "public"."v_unprocessed_news_by_symbol" AS
+ SELECT "symbol",
+    "count"(*) AS "pending_count",
+    "min"("created_at") AS "oldest_pending",
+    "max"("created_at") AS "newest_pending"
+   FROM "public"."stock_news_raw"
+  WHERE (("is_processed" = false) AND ("processing_status" = 'pending'::"text"))
+  GROUP BY "symbol"
+  ORDER BY ("count"(*)) DESC;
+
+
+ALTER VIEW "public"."v_unprocessed_news_by_symbol" OWNER TO "postgres";
+
+
+ALTER TABLE ONLY "public"."daily_highlights"
+    ADD CONSTRAINT "daily_highlights_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."fetch_log"
+    ADD CONSTRAINT "fetch_log_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."fetch_state"
+    ADD CONSTRAINT "fetch_state_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."stock_news"
+    ADD CONSTRAINT "stock_news_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."stock_news_raw"
+    ADD CONSTRAINT "stock_news_raw_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."summaries"
+    ADD CONSTRAINT "summaries_pkey" PRIMARY KEY ("id");
+
+
+
+ALTER TABLE ONLY "public"."daily_highlights"
+    ADD CONSTRAINT "unique_daily_highlight" UNIQUE ("summary_date", "summary_time");
+
+
+
+CREATE INDEX "idx_daily_highlights_created" ON "public"."daily_highlights" USING "btree" ("created_at" DESC);
+
+
+
+CREATE INDEX "idx_daily_highlights_date" ON "public"."daily_highlights" USING "btree" ("summary_date" DESC);
+
+
+
+CREATE INDEX "idx_fetch_log_created" ON "public"."fetch_log" USING "btree" ("created_at" DESC);
+
+
+
+CREATE INDEX "idx_fetch_log_source" ON "public"."fetch_log" USING "btree" ("fetch_source");
+
+
+
+CREATE INDEX "idx_fetch_log_status" ON "public"."fetch_log" USING "btree" ("status");
+
+
+
+CREATE INDEX "idx_fetch_state_finnhub_max_id" ON "public"."fetch_state" USING "btree" ("symbol", "fetch_source", "finnhub_max_id");
+
+
+
+CREATE INDEX "idx_fetch_state_last_fetch" ON "public"."fetch_state" USING "btree" ("last_fetch_to" DESC);
+
+
+
+CREATE INDEX "idx_fetch_state_source" ON "public"."fetch_state" USING "btree" ("fetch_source");
+
+
+
+CREATE UNIQUE INDEX "idx_fetch_state_symbol_source" ON "public"."fetch_state" USING "btree" ("symbol", "fetch_source");
+
+
+
+CREATE INDEX "idx_stock_news_category_error" ON "public"."stock_news" USING "btree" ("category") WHERE ("category" = ANY (ARRAY['UNCATEGORIZED'::"text", 'ERROR'::"text"]));
+
+
+
+CREATE INDEX "idx_stock_news_content_hash" ON "public"."stock_news" USING "btree" ("content_hash");
+
+
+
+CREATE INDEX "idx_stock_news_fetch_source" ON "public"."stock_news" USING "btree" ("fetch_source");
+
+
+
+CREATE INDEX "idx_stock_news_published_at" ON "public"."stock_news" USING "btree" ("published_at" DESC);
+
+
+
+CREATE INDEX "idx_stock_news_raw_content_hash" ON "public"."stock_news_raw" USING "btree" ("content_hash");
+
+
+
+CREATE INDEX "idx_stock_news_raw_published_at" ON "public"."stock_news_raw" USING "btree" ("symbol", "fetch_source", "published_at" DESC);
+
+
+
+CREATE INDEX "idx_stock_news_raw_source" ON "public"."stock_news_raw" USING "btree" ("fetch_source");
+
+
+
+CREATE INDEX "idx_stock_news_raw_status" ON "public"."stock_news_raw" USING "btree" ("processing_status");
+
+
+
+CREATE INDEX "idx_stock_news_raw_symbol" ON "public"."stock_news_raw" USING "btree" ("symbol");
+
+
+
+CREATE INDEX "idx_stock_news_raw_unprocessed" ON "public"."stock_news_raw" USING "btree" ("is_processed", "created_at" DESC) WHERE ("is_processed" = false);
+
+
+
+CREATE INDEX "idx_stock_news_secondary_category" ON "public"."stock_news" USING "btree" ("secondary_category");
+
+
+
+CREATE INDEX "idx_stock_news_symbol" ON "public"."stock_news" USING "btree" ("symbol");
+
+
+
+CREATE INDEX "idx_stock_news_symbol_position" ON "public"."stock_news" USING "btree" ("symbol", "position_in_stack");
+
+
+
+CREATE UNIQUE INDEX "idx_stock_news_symbol_url" ON "public"."stock_news" USING "btree" ("symbol", "url");
+
+
+
+CREATE INDEX "idx_summaries_created" ON "public"."summaries" USING "btree" ("created_at" DESC);
+
+
+
+CREATE INDEX "idx_summaries_news_id" ON "public"."summaries" USING "btree" ("news_id");
+
+
+
+CREATE INDEX "idx_summaries_type" ON "public"."summaries" USING "btree" ("summary_type");
+
+
+
+CREATE OR REPLACE TRIGGER "update_fetch_state_updated_at" BEFORE UPDATE ON "public"."fetch_state" FOR EACH ROW EXECUTE FUNCTION "public"."update_updated_at_column"();
+
+
+
+CREATE OR REPLACE TRIGGER "update_stock_news_raw_updated_at" BEFORE UPDATE ON "public"."stock_news_raw" FOR EACH ROW EXECUTE FUNCTION "public"."update_updated_at_column"();
+
+
+
+CREATE OR REPLACE TRIGGER "update_stock_news_updated_at" BEFORE UPDATE ON "public"."stock_news" FOR EACH ROW EXECUTE FUNCTION "public"."update_updated_at_column"();
+
+
+
+CREATE OR REPLACE TRIGGER "update_summaries_updated_at" BEFORE UPDATE ON "public"."summaries" FOR EACH ROW EXECUTE FUNCTION "public"."update_updated_at_column"();
+
+
+
+ALTER TABLE ONLY "public"."summaries"
+    ADD CONSTRAINT "summaries_news_id_fkey" FOREIGN KEY ("news_id") REFERENCES "public"."stock_news"("id") ON DELETE CASCADE;
+
+
+
+ALTER TABLE "public"."summaries" ENABLE ROW LEVEL SECURITY;
+
+
+GRANT USAGE ON SCHEMA "public" TO "postgres";
+GRANT USAGE ON SCHEMA "public" TO "anon";
+GRANT USAGE ON SCHEMA "public" TO "authenticated";
+GRANT USAGE ON SCHEMA "public" TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."increment_news_positions"("p_symbol" "text") TO "anon";
+GRANT ALL ON FUNCTION "public"."increment_news_positions"("p_symbol" "text") TO "authenticated";
+GRANT ALL ON FUNCTION "public"."increment_news_positions"("p_symbol" "text") TO "service_role";
+
+
+
+GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "anon";
+GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."update_updated_at_column"() TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."daily_highlights" TO "anon";
+GRANT ALL ON TABLE "public"."daily_highlights" TO "authenticated";
+GRANT ALL ON TABLE "public"."daily_highlights" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."fetch_log" TO "anon";
+GRANT ALL ON TABLE "public"."fetch_log" TO "authenticated";
+GRANT ALL ON TABLE "public"."fetch_log" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."fetch_state" TO "anon";
+GRANT ALL ON TABLE "public"."fetch_state" TO "authenticated";
+GRANT ALL ON TABLE "public"."fetch_state" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."stock_news" TO "anon";
+GRANT ALL ON TABLE "public"."stock_news" TO "authenticated";
+GRANT ALL ON TABLE "public"."stock_news" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."stock_news_raw" TO "anon";
+GRANT ALL ON TABLE "public"."stock_news_raw" TO "authenticated";
+GRANT ALL ON TABLE "public"."stock_news_raw" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."summaries" TO "anon";
+GRANT ALL ON TABLE "public"."summaries" TO "authenticated";
+GRANT ALL ON TABLE "public"."summaries" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."v_fetch_state_status" TO "anon";
+GRANT ALL ON TABLE "public"."v_fetch_state_status" TO "authenticated";
+GRANT ALL ON TABLE "public"."v_fetch_state_status" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."v_processing_stats" TO "anon";
+GRANT ALL ON TABLE "public"."v_processing_stats" TO "authenticated";
+GRANT ALL ON TABLE "public"."v_processing_stats" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."v_recent_fetches" TO "anon";
+GRANT ALL ON TABLE "public"."v_recent_fetches" TO "authenticated";
+GRANT ALL ON TABLE "public"."v_recent_fetches" TO "service_role";
+
+
+
+GRANT ALL ON TABLE "public"."v_unprocessed_news_by_symbol" TO "anon";
+GRANT ALL ON TABLE "public"."v_unprocessed_news_by_symbol" TO "authenticated";
+GRANT ALL ON TABLE "public"."v_unprocessed_news_by_symbol" TO "service_role";
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON SEQUENCES TO "service_role";
+
+
+
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON FUNCTIONS TO "service_role";
+
+
+
+
+
+
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "postgres";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "anon";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "authenticated";
+ALTER DEFAULT PRIVILEGES FOR ROLE "postgres" IN SCHEMA "public" GRANT ALL ON TABLES TO "service_role";
+
+
+
+
+
+
+
