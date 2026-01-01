@@ -13,7 +13,7 @@ def trigger_job(job_name: str) -> bool:
     Trigger a specific job on the remote API.
 
     Args:
-        job_name: One of 'fetch', 'recategorize', 'summary', 'all'
+        job_name: One of 'fetch', 'recategorize', 'summary', 'company-summaries', 'all'
 
     Returns:
         True if successful
@@ -76,11 +76,11 @@ def main():
 
     if command == "status":
         check_status()
-    elif command in ["fetch", "recategorize", "summary", "all"]:
+    elif command in ["fetch", "recategorize", "summary", "all", "company-summaries"]:
         trigger_job(command)
     else:
         print(f"Unknown command: {command}")
-        print("Valid commands: fetch, recategorize, summary, all, status")
+        print("Valid commands: fetch, recategorize, summary, all, company-summaries, status")
         sys.exit(1)
 
 if __name__ == "__main__":

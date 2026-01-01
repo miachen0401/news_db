@@ -28,17 +28,13 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 EST = timezone(timedelta(hours=-5))
 UTC = timezone.utc
 
-# Log directory for caching summaries
-LOG_DIR = Path(__file__).parent / ".log"
-
-
 def determine_summary_target(now_est: datetime) -> tuple[date, time, datetime, datetime]:
     """
     Determine which summary should be generated based on current time.
 
     Two summary points per day (EST):
     - 8 AM: Covers yesterday 6 PM to today 8 AM
-    - 6 PM: Covers today 8 AM to today 6 PM
+    - 6 PM: Covers yesterday 6 PM to today 6 PM
 
     Logic:
     - If current time is 9 AM - 5:59 PM: Generate/check 8 AM summary for today
@@ -67,16 +63,16 @@ def determine_summary_target(now_est: datetime) -> tuple[date, time, datetime, d
         # Generate 6 PM summary for today
         summary_date_est = now_est.date()
         summary_time_est = time(18, 0, 0)
-        # News window: today 8 AM to today 6 PM
-        from_time_est = datetime.combine(summary_date_est, time(8, 0, 0))
+        # News window: yesterday 6 PM to today 6 PM
+        from_time_est = datetime.combine(summary_date_est - timedelta(days=1), time(18, 0, 0))
         to_time_est = datetime.combine(summary_date_est, time(18, 0, 0))
 
     else:  # 0-8 (12 AM to 8:59 AM)
         # Generate 6 PM summary for yesterday
         summary_date_est = (now_est - timedelta(days=1)).date()
         summary_time_est = time(18, 0, 0)
-        # News window: yesterday 8 AM to yesterday 6 PM
-        from_time_est = datetime.combine(summary_date_est, time(8, 0, 0))
+        # News window: yesterday 6 PM to yesterday 6 PM (actually day before yesterday 6 PM to yesterday 6 PM)
+        from_time_est = datetime.combine(summary_date_est - timedelta(days=1), time(18, 0, 0))
         to_time_est = datetime.combine(summary_date_est, time(18, 0, 0))
 
     return summary_date_est, summary_time_est, from_time_est, to_time_est
@@ -229,66 +225,10 @@ async def main():
 
     logger.debug("")
     # ========================================
-    # STEP 3: Save to log file (local cache)
+    # STEP 3: Save to Database
     # ========================================
     logger.debug("-" * 70)
-    logger.info("STEP 3: Save to Log File (Local Cache)")
-    logger.debug("-" * 70)
-    # Create .log directory if not exists
-    LOG_DIR.mkdir(exist_ok=True)
-
-    # Generate log filename: summary_YYYY-MM-DD_HH-MM-SS.log
-    log_filename = f"summary_{summary_date_est.strftime('%Y-%m-%d')}_{summary_time_est.strftime('%H-%M-%S')}.log"
-    log_path = LOG_DIR / log_filename
-
-    try:
-        # Build complete log content
-        log_content = []
-        log_content.append("=" * 70)
-        log_content.append("📊 DAILY NEWS SUMMARY")
-        log_content.append("=" * 70)
-        log_content.append(f"Summary Date: {summary_date_est} {summary_time_est} EST")
-        log_content.append(f"News Window: {from_time_est.strftime('%m/%d %H:%M')} - {to_time_est.strftime('%m/%d %H:%M')} EST")
-        log_content.append(f"Generated: {now_est.strftime('%Y-%m-%d %H:%M:%S')} EST")
-        log_content.append(f"News Count: {len(news_items)}")
-        log_content.append("")
-
-        if category_counts:
-            log_content.append("📊 News by Category:")
-            for cat, count in sorted(category_counts.items(), key=lambda x: -x[1]):
-                log_content.append(f"   {cat}: {count}")
-            log_content.append("")
-
-        log_content.append("=" * 70)
-        log_content.append("SUMMARY:")
-        log_content.append("=" * 70)
-        log_content.append(highlight_text)
-        log_content.append("=" * 70)
-
-        # Write to log file
-        with open(log_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(log_content))
-
-        logger.info(f"Saved to log file: {log_path}")
-        logger.info(f"   File size: {log_path.stat().st_size} bytes")
-    except Exception as e:
-        logger.info(f"Error saving log file: {e}")
-    logger.debug("")
-    # Display summary in terminal (shortened)
-    logger.debug("=" * 70)
-    logger.debug("Generated Summary (Preview):")
-    logger.debug("=" * 70)
-    # Show first 500 characters as preview
-    preview = highlight_text[:500] + "..." if len(highlight_text) > 500 else highlight_text
-    logger.debug(preview)
-    logger.debug("=" * 70)
-    logger.debug(f"📄 Full summary saved to: {log_path}")
-    logger.debug("")
-    # ========================================
-    # STEP 4: Save to Database
-    # ========================================
-    logger.debug("-" * 70)
-    logger.info("STEP 4: Save to Database")
+    logger.info("STEP 3: Save to Database")
     logger.debug("-" * 70)
     categories_included = list(category_counts.keys()) if news_items else []
 
@@ -299,7 +239,8 @@ async def main():
         to_time=to_time,      # UTC timestamp
         highlight_text=highlight_text,
         news_count=len(news_items),
-        categories_included=categories_included
+        categories_included=categories_included,
+        symbol="general"  # General market summary
     )
 
     if success:
@@ -318,7 +259,6 @@ async def main():
     logger.info(f"Time: {summary_time_est} (EST)")
     logger.info(f"News Count: {len(news_items)}")
     logger.info(f"Summary Length: {len(highlight_text)} characters")
-    logger.info(f"Log File: {log_path}")
     logger.debug("")
 
     return {

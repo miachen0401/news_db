@@ -1094,3 +1094,175 @@ uv run api/generate_daily_summary.py
 - **Consistent Naming**: `recategorize.py` matches endpoint name `/trigger/recategorize`
 - **Clear Separation**: Core logic separated from API execution scripts
 - **Portable Execution**: Scripts can be run from any location
+
+## 2025-12-31: Implemented company-specific daily summaries with per-company news tracking
+Added company-specific summary generation twice daily for all tracked companies with simplified prompts.
+
+### Database Changes:
+- **Migration**: `add_symbol_to_daily_highlights.sql`
+  - Added `symbol` column to `daily_highlights` table (TEXT, nullable)
+  - Updated unique constraint: `(summary_date, summary_time, symbol)` instead of `(summary_date, summary_time)`
+  - Added index: `idx_daily_highlights_symbol` for company-specific queries
+  - symbol="general" = general market summary
+  - symbol="AAPL", "TSLA", etc. = company-specific summary
+
+### Files Created:
+- `api/generate_company_summary.py` - Company-specific summary generation script
+  - `generate_company_summary(symbol)` - Generate summary for single company
+  - `generate_all_company_summaries()` - Iterate through all tracked companies
+  - Command-line args: `--symbol AAPL` or `--all`
+  - Fetches news from same time window as daily summaries (6PM-8AM or 8AM-6PM)
+  - Filters news by symbol, sends to LLM for simplified summary
+  - Returns "No news updates" message if no news found (no LLM call)
+
+### Files Modified:
+- **`api/src/services/daily_summarizer.py`**:
+  - Added `_build_company_summary_prompt()` - Simplified prompt for company news
+  - Added `generate_company_summary()` - Company-specific summary generation
+  - Simplified prompt: One paragraph, 3-5 sentences, focus on market-moving events
+  - Auto-returns "No news updates" message if news count < 1 (no LLM call)
+  - Removed unused imports (json, asyncio)
+
+- **`api/src/db/daily_highlights.py`**:
+  - Updated `save_highlight()` - Added optional `symbol` parameter
+  - Updated `get_highlight()` - Added optional `symbol` parameter
+  - Handles NULL vs non-NULL symbol queries correctly
+  - Uses `.is_("symbol", "null")` for general summaries
+  - Uses `.eq("symbol", symbol)` for company summaries
+
+- **`api_server.py`**:
+  - Added new endpoint: `GET /summary/{symbol}` - Get company-specific summary
+  - Added `run_company_summaries()` wrapper for batch generation
+  - Added trigger endpoint: `POST /trigger/company-summaries`
+  - Updated `POST /trigger/all` to include company summaries
+  - Added "company_summaries" to job_status tracking
+  - Updated root endpoint to show new endpoints
+  - Validates symbol against `TRACKED_COMPANIES` list
+  - Auto-generates summary if not found, then returns
+
+### API Endpoints:
+
+**New GET Endpoint:**
+- `GET /summary/{symbol}` - Get current company summary
+  - Example: `/summary/AAPL`, `/summary/TSLA`
+  - Validates symbol against tracked companies list
+  - Returns existing summary or generates new one
+  - Response includes: status, company, symbol, summary_date, summary_time, highlight_text, news_count
+
+**Updated GET Endpoint:**
+- `GET /summary/daily` - General market summary (unchanged behavior)
+  - Now explicitly passes `symbol="general"` to get general summaries
+  - Maintains backward compatibility
+
+**New POST Endpoint:**
+- `POST /trigger/company-summaries` - Generate summaries for all companies
+  - Iterates through all companies in `TRACKED_COMPANIES`
+  - Generates summary for each company at current time window
+  - Background task execution
+
+**Updated POST Endpoint:**
+- `POST /trigger/all` - Now triggers 4 jobs instead of 3
+  - fetch_incremental
+  - recategorize_existing
+  - daily_summary (general)
+  - company_summaries (all companies)
+
+### Summary Generation Logic:
+
+**Time Windows:**
+- 8 AM Summary: Yesterday 6 PM → Today 8 AM (14 hours)
+- 6 PM Summary: Yesterday 6 PM → Today 6 PM (24 hours)
+
+**Processing Flow:**
+1. Determine summary target (date, time, from_time, to_time)
+2. Fetch all news in time window (filtered by INCLUDED_CATEGORIES)
+3. Filter news by company symbol (checks if symbol in news.symbol field)
+4. If no news found: Skip LLM, return "No news updates" message
+5. If news found: Send to LLM with simplified prompt
+6. Save to database with symbol field populated
+7. Return summary
+
+**Prompt Comparison:**
+
+General Summary (unchanged):
+- Complex multi-section prompt
+- Groups by category
+- Focuses on market themes
+- Returns markdown with headers
+
+Company Summary (new):
+- Simple one-paragraph prompt
+- Highlights key events
+- Focuses on actionable information (earnings, products, regulations)
+- Professional, factual tone
+- 3-5 sentences maximum
+
+### Example Usage:
+
+**Command Line:**
+```bash
+# Generate summary for single company
+uv run python api/generate_company_summary.py --symbol AAPL
+
+# Generate summaries for all companies
+uv run python api/generate_company_summary.py --all
+```
+
+**API Calls:**
+```bash
+# Get AAPL summary
+curl http://localhost:8000/summary/AAPL
+
+# Trigger all company summaries
+curl -X POST http://localhost:8000/trigger/company-summaries
+
+# Check job status
+curl http://localhost:8000/status
+```
+
+**Example Response:**
+```json
+{
+  "status": "found",
+  "company": "Apple Inc.",
+  "symbol": "AAPL",
+  "summary_date": "2025-12-31",
+  "summary_time": "08:00:00",
+  "highlight_text": "Apple announced Q4 earnings beat with revenue up 8% YoY, driven by strong iPhone sales in emerging markets. The company also revealed plans to invest $10B in AI research over the next three years. Analysts upgraded the stock following the earnings report, citing robust fundamentals.",
+  "news_count": 12,
+  "updated_at": "2025-12-31T13:00:00"
+}
+```
+
+**No News Example:**
+```json
+{
+  "status": "generated",
+  "company": "Quantum Computing Inc.",
+  "symbol": "QUBT",
+  "summary_date": "2025-12-31",
+  "summary_time": "08:00:00",
+  "highlight_text": "No news updates for Quantum Computing Inc. (QUBT) during this period.",
+  "news_count": 0
+}
+```
+
+### Benefits:
+- **Company-Specific Insights**: Users can get focused summaries per company
+- **Efficient LLM Usage**: Only calls LLM when news exists
+- **Simplified Prompts**: Company summaries use lighter prompts (faster, cheaper)
+- **Flexible API**: Can get general market OR company-specific summaries
+- **Batch Generation**: Can generate all companies at once via trigger
+- **Database Efficiency**: Single table handles both general and company summaries
+- **Backward Compatible**: General summaries (symbol="general") work unchanged
+- **Consistent Time Windows**: Both summaries now start from yesterday 6 PM for consistency
+
+### Implementation Notes:
+- Used same time logic as general summaries (reused `determine_summary_target()`)
+- Kept code lightweight (no over-engineering)
+- News filtering: Both general and company summaries filter by `INCLUDED_CATEGORIES`
+- Company filtering: checks if company symbol appears in `news.symbol` field
+- No duplicate LLM calls: checks existing summary first
+- "No news" handling: skips LLM call, saves database space
+- **Time Window Fix**: Changed 6 PM summary to cover yesterday 6 PM → today 6 PM (was 8 AM → 6 PM)
+- **Symbol Convention**: General summaries use symbol="general" (not NULL)

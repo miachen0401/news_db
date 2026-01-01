@@ -1,8 +1,6 @@
 """Daily news summarizer using Zhipu AI."""
 from typing import List, Dict, Any, Optional
 import httpx
-import json
-import asyncio
 
 from src.config import LLM_MODELS
 import logging
@@ -159,6 +157,111 @@ Generate the daily highlights below:
 
         except Exception as e:
             logger.debug(f"Error generating daily summary: {e}")
+            return None
+
+    def _build_company_summary_prompt(self, company_symbol: str, company_name: str, news_items: List[Dict[str, Any]]) -> str:
+        """
+        Build simplified prompt for company-specific summary.
+
+        Args:
+            company_symbol: Stock symbol (e.g., AAPL)
+            company_name: Company name (e.g., Apple Inc.)
+            news_items: List of news items for this company
+
+        Returns:
+            Formatted prompt string
+        """
+        # Build news list
+        news_list = []
+        for idx, item in enumerate(news_items, 1):
+            title = item.get('title', 'No title')
+            summary = item.get('summary', 'No summary')
+            published_at = item.get('published_at', 'Unknown time')
+            category = item.get('category', 'UNCATEGORIZED')
+
+            news_list.append(f"\n{idx}. [{published_at}] {title}")
+            news_list.append(f"   Category: {category}")
+            if summary:
+                news_list.append(f"   Summary: {summary}")
+
+        news_text = "\n".join(news_list)
+
+        prompt = f"""You are a financial news analyst. Summarize the following news for {company_name} ({company_symbol}) in one concise paragraph.
+
+# News Articles ({len(news_items)} total)
+{news_text}
+
+# Task
+Write a single paragraph that:
+- Highlights key events and insights that might drive the market
+- Focuses on actionable information (earnings, product launches, regulatory changes, partnerships, etc.)
+- Maintains a professional, factual tone
+- Keeps it concise (3-5 sentences maximum)
+
+Generate the summary below:
+"""
+        return prompt
+
+    async def generate_company_summary(
+        self,
+        company_symbol: str,
+        company_name: str,
+        news_items: List[Dict[str, Any]],
+        temperature: Optional[float] = None
+    ) -> Optional[str]:
+        """
+        Generate company-specific summary from news items.
+
+        Args:
+            company_symbol: Stock symbol (e.g., AAPL)
+            company_name: Company name (e.g., Apple Inc.)
+            news_items: List of news dictionaries for this company
+            temperature: LLM temperature (lower = more consistent), defaults to config value
+
+        Returns:
+            Generated summary text or None if failed
+        """
+        if not news_items or len(news_items) == 0:
+            return f"No news updates for {company_name} ({company_symbol}) during this period."
+
+        # Use config temperature if not provided
+        if temperature is None:
+            temperature = self.temperature
+
+        try:
+            prompt = self._build_company_summary_prompt(company_symbol, company_name, news_items)
+
+            response = await self.client.post(
+                self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    "temperature": temperature,
+                }
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                summary = result['choices'][0]['message']['content'].strip()
+
+                logger.debug(f"Generated company summary for {company_symbol} ({len(news_items)} articles)")
+                return summary
+            else:
+                logger.debug(f"LLM API error: {response.status_code}")
+                logger.debug(f"Response: {response.text}")
+                return None
+
+        except Exception as e:
+            logger.debug(f"Error generating company summary for {company_symbol}: {e}")
             return None
 
     async def close(self):
