@@ -1,5 +1,8 @@
 # Change Records
 
+## 2026-01-02 15:00: Fixed missing 8 AM summaries - wrong time window logic
+Root cause: `determine_summary_target()` in generate_daily_summary.py:54 used `if 9 <= current_hour <= 17` to generate 8 AM summaries. Running at 8 AM fell into else block, generating yesterday's 6 PM summary instead. Fixed by changing to `if 8 <= current_hour <= 17`. Also created database migration to add symbol to unique constraint (prevents company summaries from overwriting each other). Details in docs/FIX_Database_Docs.md.
+
 ## 2025-12-30 11:30: Fixed critical infinite loop in re-categorization when LLM returns wrong category
 Prevents infinite loop by fetching all items needing re-categorization ONCE before processing, instead of continuously querying database. Modified `recategorize_batch()` to accept optional `items_to_fix` parameter - when provided, processes those specific items instead of querying database. Items are processed once per run; any remaining items with wrong categories will be picked up on next run. Removed unused imports (List, RawNewsItem) from llm_news_processor.py.
 

@@ -37,10 +37,10 @@ def determine_summary_target(now_est: datetime) -> tuple[date, time, datetime, d
     - 6 PM: Covers yesterday 6 PM to today 6 PM
 
     Logic:
-    - If current time is 9 AM - 5:59 PM: Generate/check 8 AM summary for today
-    - If current time is 6 PM - 8:59 AM: Generate/check 6 PM summary
+    - If current time is 8 AM - 5:59 PM: Generate/check 8 AM summary for today
+    - If current time is 6 PM - 7:59 AM: Generate/check 6 PM summary
       - 6 PM - 11:59 PM: Today's 6 PM summary
-      - 12 AM - 8:59 AM: Yesterday's 6 PM summary
+      - 12 AM - 7:59 AM: Yesterday's 6 PM summary
 
     Args:
         now_est: Current time in EST timezone
@@ -51,7 +51,7 @@ def determine_summary_target(now_est: datetime) -> tuple[date, time, datetime, d
     current_hour = now_est.hour
 
     # Determine which summary to generate
-    if 9 <= current_hour <= 17:  # 9 AM to 5:59 PM
+    if 8 <= current_hour <= 17:  # 8 AM to 5:59 PM
         # Generate 8 AM summary for today
         summary_date_est = now_est.date()
         summary_time_est = time(8, 0, 0)
@@ -67,7 +67,7 @@ def determine_summary_target(now_est: datetime) -> tuple[date, time, datetime, d
         from_time_est = datetime.combine(summary_date_est - timedelta(days=1), time(18, 0, 0))
         to_time_est = datetime.combine(summary_date_est, time(18, 0, 0))
 
-    else:  # 0-8 (12 AM to 8:59 AM)
+    else:  # 0-7 (12 AM to 7:59 AM)
         # Generate 6 PM summary for yesterday
         summary_date_est = (now_est - timedelta(days=1)).date()
         summary_time_est = time(18, 0, 0)
