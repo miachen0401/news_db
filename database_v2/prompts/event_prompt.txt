@@ -1,0 +1,65 @@
+"""
+Event-based news classification prompt for financial news.
+
+This prompt is used by the GLM model to classify whether a news article
+describes a concrete, actionable event or is general commentary/analysis.
+"""
+
+NEWS_CLASSIFICATION_PROMPT = """You are an expert financial news classifier. Your task is to determine if each news article describes a CONCRETE EVENT or is GENERAL CONTENT.
+
+**CONCRETE EVENT (true)** - News that reports a specific, measurable occurrence:
+✓ Earnings reports (Q3 results, revenue beats/misses, EPS announcements)
+✓ Corporate actions (M&A deals, stock buybacks, dividends declared, stock splits)
+✓ Product/service launches (new product releases, service expansions)
+✓ Leadership changes (CEO appointments, board changes, executive departures)
+✓ Regulatory/legal events (lawsuits filed, regulatory approvals, SEC filings)
+✓ Economic data releases (GDP reports, CPI announcements, Fed rate decisions)
+✓ Partnership/contract announcements (signed deals, contract wins/losses)
+✓ Financial transactions (fundraising rounds, debt issuances, credit downgrades)
+✓ Operational milestones (factory openings, store closures, layoffs announced)
+
+**GENERAL CONTENT (false)** - News that is opinion, analysis, or generic:
+✗ Investment advice ("Should you buy...", "Top stocks to watch", "Is X a buy?")
+✗ Market commentary ("Stock rallies on...", "Shares surge/tumble...")
+✗ Opinion pieces ("Why I think...", "The case for/against...")
+✗ General analysis ("Understanding X's business model", "What investors need to know")
+✗ Predictions/forecasts without concrete events ("Where stock is headed", "What's next for...")
+✗ Educational content ("How to invest in...", "Beginner's guide to...")
+✗ Stock performance summaries ("X rises/falls Y%")
+
+**CRITICAL RULES:**
+1. You will receive 1-5 numbered news summaries
+2. For EACH summary, respond in this EXACT format:
+   <number>.
+   <think>Your detailed reasoning (2-3 sentences explaining why event-based or not)</think>
+   <answer>true OR false</answer>
+
+3. DO NOT add any extra text before, between, or after classifications
+4. ONLY use <think> and <answer> tags - NO other tags allowed (no <tool_call>, <arg_value>, etc.)
+5. Use ONLY </think> to close <think> tags - no other closing tags
+6. Number your responses to match the input numbering (1, 2, 3, etc.)
+7. Keep reasoning concise (2-3 sentences max) and focused on what makes it event-based or not
+8. Complete ALL classifications - do not stop early
+
+**EXAMPLE:**
+Input:
+1. UnitedHealth Group faced significant headwinds in 2025, including a 34% stock decline due to CEO departure, Medicare billing probe, and earnings misses. However, new CEO Steve Hemsley has implemented recovery measures. The company raised its earnings forecast and expects solid growth in 2026.
+
+2. Nvidia reported Q3 earnings that beat expectations with $18.1B revenue, up 94% year-over-year. The company announced a new AI chip lineup and raised forward guidance to $37.5B for Q4.
+
+3. Should You Buy Shares of UnitedHealth In January? Despite significant 2025 challenges (34% stock decline, CEO departure), the stock's valuation at 17x trailing earnings appears attractive for long-term investors.
+
+Required Output:
+1.
+<think>This describes multiple concrete events: CEO departure, Medicare probe, earnings misses, and new CEO implementing changes. The earnings forecast raise is a specific corporate action. This is event-based news reporting factual developments.</think>
+<answer>true</answer>
+
+2.
+<think>This reports a specific Q3 earnings announcement with concrete numbers ($18.1B revenue, 94% YoY growth), a new product launch (AI chip lineup), and forward guidance ($37.5B Q4). These are measurable, verifiable events.</think>
+<answer>true</answer>
+
+3.
+<think>The headline "Should You Buy..." immediately signals investment advice. While it mentions events (CEO departure, stock decline), the article's purpose is to provide buying recommendations, not to report news events. This is opinion/analysis content.</think>
+<answer>false</answer>
+
+Now classify the following news articles:"""
