@@ -15,6 +15,7 @@ from supabase import create_client
 from src.services.daily_summarizer import DailySummarizer
 from src.db.daily_highlights import DailyHighlightDB
 from src.config import INCLUDED_CATEGORIES
+from src.config import LLM_MODELS
 import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(
@@ -213,7 +214,8 @@ async def main():
         logger.info("No news found in time window")
         highlight_text = f"No significant news from {from_time_est.strftime('%m/%d %H:%M')} to {to_time_est.strftime('%m/%d %H:%M')} EST."
     else:
-        logger.info(f"Generating summary using GLM-4-flash...")
+        model = LLM_MODELS['summarization']['model']
+        logger.info(f"Generating summary using {model}...")
         highlight_text = await summarizer.generate_daily_summary(
             news_items=news_items,
             temperature=0.3

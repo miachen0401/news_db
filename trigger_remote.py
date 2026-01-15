@@ -6,7 +6,7 @@ from datetime import datetime
 
 # CONFIGURATION - Update with your Render URL
 API_URL = "https://news-db-1pgr.onrender.com"  # Update this!
-#API_URL = "http://localhost:8000"
+API_URL = "http://localhost:8000"
 
 def trigger_job(job_name: str) -> bool:
     """
