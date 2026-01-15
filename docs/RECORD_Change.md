@@ -1,5 +1,23 @@
 # Change Records
 
+## 2026-01-14 20:20: Added logging for news without summaries
+Added automatic logging of news items that lack summary fields. When extraction encounters news without summaries, it saves their id, url, fetch_source, and raw_json to logs/no_summary_YYYYMMDD_HHMMSS.json for investigation. Added logs/ directory with README explaining log format and use cases. Updated .gitignore to exclude logs/ from git. This helps identify data quality issues from specific news sources.
+
+## 2026-01-14 20:15: Simplified to single process.py script with clean module structure
+Consolidated into one main script (process.py) that orchestrates both extraction and classification. Modules organized in subdirectories: db/ for database operations (StockProcessDB), processors/ for business logic (NewsExtractor, EventClassifier). Removed all duplicate/old files (extract_news.py, classify_news.py, 1_extract.py, 2_classify.py, test_classifier.py). Single command "uv run python process.py test" runs entire pipeline. Clean imports: "from db import StockProcessDB" and "from processors import NewsExtractor, EventClassifier". Updated README with simplified usage.
+
+## 2026-01-14 20:00: Refactored database_v2 into clean modular architecture
+Separated process_news.py into two independent phases: (1) extract_news.py - extracts structured data from raw_json and saves to stock_process_v1 without LLM classification, (2) classify_news.py - fetches unclassified records and updates with LLM results. Created db/ folder with StockProcessDB class containing all Supabase queries (fetch_raw_news, check_existing, insert_extracted_news, update_classification, etc.). This separation allows fast extraction without LLM costs, flexible classification in batches, easy debugging, and clean code organization. Updated README.md with architecture details and usage examples.
+
+## 2026-01-14 19:45: Reduced concurrency to 1 and improved error handling
+Changed concurrency_limit from 2 to 1 in config.py to avoid GLM API rate limits. Added retry logic for empty LLM responses and improved duplicate check error handling to prevent crashes on Supabase connection errors. Now processes 5 news per batch sequentially instead of 10 in parallel.
+
+## 2026-01-14 19:30: Fixed event classifier prompt and raw_json extraction logic
+Improved event classification prompt in 1_event_prompt.txt with detailed examples and clear rules distinguishing concrete events from opinion/analysis. Fixed process_news.py to correctly extract title (try `title` then `headline`), source (try `source` then `publisher.name` for Polygon API), and summary (try `description` then `summary`) from raw_json JSONB field in stock_news_raw table. Added GLM tag fix: replace `</arg_value>` with `</think>` since GLM sometimes uses internal function calling format. Increased max_tokens to 2000 to prevent truncated responses. Verified llm_reasoning column exists in stock_process_v1 and is populated correctly. Tested successfully with sample data.
+
+## 2026-01-14 00:30: Created database_v2 with event-based news classification pipeline
+Implemented new processing pipeline in database_v2/ folder with GLM 4.5 Flash event classification. Created stock_process_v1 table to store processed news with event_based boolean field. Processor reads from stock_news_raw, classifies using prompt from 1_event_prompt.txt, and saves to stock_process_v1. Supports two modes: test (last 100 least recent news) and production (all news after 2024-12-20). All timestamps handled in UTC. Writes only to stock_process_v1 table. **Concurrency: 2 parallel LLM calls, each processing 5 news** (processes 10 news simultaneously). Batch processing reduces API costs by 5x (100 news = 20 calls instead of 100). Enhanced parsing with fallback patterns and detailed debug logging.
+
 ## 2026-01-02 15:00: Fixed missing 8 AM summaries - wrong time window logic
 Root cause: `determine_summary_target()` in generate_daily_summary.py:54 used `if 9 <= current_hour <= 17` to generate 8 AM summaries. Running at 8 AM fell into else block, generating yesterday's 6 PM summary instead. Fixed by changing to `if 8 <= current_hour <= 17`. Also created database migration to add symbol to unique constraint (prevents company summaries from overwriting each other). Details in docs/FIX_Database_Docs.md.
 

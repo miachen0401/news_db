@@ -53,6 +53,7 @@ htmlcov/
 .log/*.log
 !.log/.gitkeep
 !.log/README.md
+database_v2/logs/
 
 # Database
 *.db
