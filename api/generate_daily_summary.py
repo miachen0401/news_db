@@ -119,15 +119,16 @@ async def main():
     logger.debug("")
 
     # ========================================
-    # Check if summary already exists
+    # Check if summary already exists for "general"
     # ========================================
     logger.debug("-" * 70)
-    logger.info("Checking for Existing Summary")
+    logger.info("Checking for Existing Summary (symbol: general)")
     logger.debug("-" * 70)
 
     existing = await highlights_db.get_highlight(
         summary_date=summary_date_est,
-        summary_time=summary_time_est
+        summary_time=summary_time_est,
+        symbol="general"  # Always check for general summary
     )
 
     if existing:
